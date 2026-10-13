@@ -4,13 +4,12 @@ import PackageDescription
 // 2wai Avatar Toolkit — iOS native SDK (v0.1)
 //
 // SPM manifest for TwaiAvatarKit — 2wai avatars on iOS via Transport 0 (LiveKit).
-// Design + shape locked at: docs/internal/ios_native_sdk_plan.md on 2wai-toolkit main.
 //
 // v0.1 scope: TwaiCore (REST + types + credentials + errors), TwaiLiveKit
 // (Transport 0 engine port of the Dart engine.dart), TwaiPlayer (SwiftUI
 // TwaiPlayerView + handle). Mic + full catalog hydrate are v0.2.
 //
-// Status 2026-10-08: shape ships; needs iPhone verification on Jim's Mac.
+// Device-verified on physical iPhone (greeting, audio, Q&A, idle).
 
 let package = Package(
     name: "TwaiAvatarKit",
@@ -34,7 +33,7 @@ let package = Package(
         // track is PUBLISHED. A receive-only avatar publishes nothing, so the
         // decoded remote audio is never pulled and the client is silent while
         // every diagnostic (session category, route, volume, subscribed+unmuted
-        // track) reads correct. See docs/internal/livekit_ios_receive_only_audio.md.
+        // track) reads correct.
         .package(url: "https://github.com/livekit/client-sdk-swift", .upToNextMinor(from: "2.3.0")),
     ],
     targets: [

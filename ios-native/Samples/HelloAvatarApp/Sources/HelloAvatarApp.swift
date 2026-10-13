@@ -86,9 +86,9 @@ struct AvatarScreen: View {
         credentials: .mintProxy(url: MINT_PROXY_URL)
     )
 
-    /// Pattern B greeting (docs/internal/twai_greeting_design.md): Dr. Alman has
-    /// no pre-rendered intro video, so the opener is a programmatic primer sent
-    /// once on ready. The LLM generates the actual spoken greeting.
+    /// Programmatic greeting primer: if an avatar has no pre-rendered intro
+    /// video, send a short "opener" message once on ready and let the LLM
+    /// generate the actual spoken greeting.
     private let greetingPrimer = "Greet me briefly and ask what I'd like to talk about."
 
     var body: some View {

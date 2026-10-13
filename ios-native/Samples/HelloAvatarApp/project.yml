@@ -2,10 +2,10 @@
 #
 # The sample under ../HelloAvatar is an SPM *executable*, which cannot be
 # code-signed and deployed to a physical iPhone. This target is a real iOS
-# app that consumes the local TwaiAvatarKit package, so step 5 of
-# HANDOFF_TO_MAC.md (run on device) is possible.
+# app that consumes the local TwaiAvatarKit package so you can run on device.
 #
-# Regenerate after editing:  xcodegen generate
+# Set DEVELOPMENT_TEAM below to your Apple Developer Team ID before
+# building. Regenerate the Xcode project after editing: `xcodegen generate`.
 name: HelloAvatarApp
 options:
   bundleIdPrefix: ai.twai
@@ -32,7 +32,8 @@ targets:
         PRODUCT_NAME: HelloAvatar
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
-        DEVELOPMENT_TEAM: C48WHV6PZC
+        # Replace with your Apple Developer Team ID (10 chars).
+        DEVELOPMENT_TEAM: YOUR_TEAM_ID
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"

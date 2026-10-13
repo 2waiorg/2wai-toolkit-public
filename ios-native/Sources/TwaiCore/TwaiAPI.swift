@@ -85,8 +85,8 @@ public enum TwaiAPI {
 
     /// A single avatar record from catalog hydrate.
     ///
-    /// Field mapping documented in `docs/catalog_hydrate_gateway_pr.md`
-    /// on toolkit main (now at `docs/internal/`).
+    /// Field mapping follows the gateway's `GET /v1/avatars/{owner}/{name}`
+    /// response shape (see https://developers.2wai.ai/guides/catalog-hydrate/).
     public struct Avatar: Codable, Sendable {
         public let owner: String
         public let name: String  // avatarname (handle, not display)
