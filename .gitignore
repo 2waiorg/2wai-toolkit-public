@@ -22,7 +22,29 @@ Thumbs.db
 
 # Local secrets — read via --dart-define-from-file=.env
 .env
+.env.*
 !.env.example
+!.env.*.example
+
+# Explicit secret-type belt-and-braces (public repo safety net).
+# These should NEVER land in git; if one of these exists in the working
+# tree, something is wrong at the source — don't just untrack it.
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+credentials*.json
+service-account*.json
+serviceAccount*.json
+*secret*.json
+.aws/
+.azure/
+.gcloud/
 
 # Generated platform folders inside apps (re-creatable via flutter create)
 # Keep android/, ios/, web/ committed — they include manifest/icon/HTML edits we own.
