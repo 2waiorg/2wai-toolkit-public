@@ -38,8 +38,9 @@ public enum TwaiError: Error, LocalizedError, Sendable {
 
     // Server-side errors — gateway responded 5xx or the bridge returned 503.
 
-    /// Catalog hydrate route returned 503 — bearer not installed on the gateway yet.
-    /// Pending Ops install in `twaisecretskv`; see `docs/catalog_hydrate_service_bearer_install.md`.
+    /// Catalog hydrate route returned 503 — the gateway's gen-2wai bridge is
+    /// not configured. See the dev-docs catalog-hydrate guide for the current
+    /// shape: https://developers.2wai.ai/guides/catalog-hydrate/
     case catalogHydrateNotConfigured(message: String)
 
     /// Gateway returned 5xx for a reason not above.

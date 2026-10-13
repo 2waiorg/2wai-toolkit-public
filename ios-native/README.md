@@ -116,12 +116,10 @@ Deferred to v0.2:
 - XCFramework distribution (SPM only in v0.1).
 - Call mode (deferred until Mason's web SDK PR #4 lands + the Dart port stabilizes).
 
-## Known caveats (be honest with the integrator)
+## Known caveats
 
-- **Not iPhone-verified yet.** Authored 2026-10-08 on Windows. Needs a Mac + Xcode build + a physical iPhone session before any customer sees this.
-- **LiveKit Swift SDK API shape may need adjustment.** The code targets `livekit-client 2.3+`; delegate method signatures (`RoomDelegate`), publish/subscribe helpers, and `VideoView` import might differ slightly from what shipped — the build will tell us which.
-- **Mint-proxy GET route for catalog hydrate is a convention guess.** `TwaiAPIClient.getAvatar` derives the hydrate URL by stripping `/v1/sessions` from the mint-proxy URL and appending `/v1/avatars/{owner}/{name}`. If your mint proxy's path layout differs, override the gateway base URL and use `._rawSecretKey` or extend the client to accept a per-route URL template.
-- **Catalog hydrate still returns 503 against the production gateway** until the shared service bearer lands in `twaisecretskv` (pending Ops install).
+- **Mint-proxy GET route for catalog hydrate is a convention.** `TwaiAPIClient.getAvatar` derives the hydrate URL by stripping `/v1/sessions` from the mint-proxy URL and appending `/v1/avatars/{owner}/{name}`. If your mint proxy's path layout differs, override the gateway base URL or extend the client to accept a per-route URL template.
+- **Catalog hydrate returns a gen RID that today's mint path doesn't accept.** Use the per-tenant `avt_...` from your account for `createSession` and treat `getAvatar()` output as metadata only. See [the dev docs tenancy explainer](https://developers.2wai.ai/concepts/#avatar-ids-are-per-tenant).
 
 ## Related
 

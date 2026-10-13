@@ -53,42 +53,10 @@ function Free-Port {
 }
 
 function Get-PersonalKey {
-  if (-not (Test-Path $AZ)) {
-    Write-Host "[key] az CLI not at expected path -- using shared" -ForegroundColor DarkYellow
-    return $null
-  }
-  Write-Host "[key] querying Key Vault (5s timeout)..." -ForegroundColor Cyan
-  # Wrap in background job with hard 5s timeout so slow network / VPN
-  # can't hang the whole launcher.
-  $job = Start-Job -ScriptBlock {
-    param($az)
-    & $az keyvault secret show --vault-name twaisecretskv --name twai-api-jim-sk --query value -o tsv 2>$null
-    return $LASTEXITCODE
-  } -ArgumentList $AZ
-  $completed = Wait-Job $job -Timeout 5
-  if (-not $completed) {
-    Write-Host "[key] Key Vault fetch >5s -- killing + using shared" -ForegroundColor DarkYellow
-    Stop-Job $job -ErrorAction SilentlyContinue
-    Remove-Job $job -Force -ErrorAction SilentlyContinue
-    return $null
-  }
-  $lines = Receive-Job $job
-  $exit = if ($lines -is [array]) { $lines[-1] } else { $lines }
-  Remove-Job $job -Force -ErrorAction SilentlyContinue
-  # First lines are the actual output; last is the exit code we returned
-  $out = ''
-  if ($lines -is [array] -and $lines.Count -gt 1) {
-    $out = ($lines[0..($lines.Count - 2)] | Out-String).Trim()
-  }
-  if ($exit -ne 0) {
-    Write-Host "[key] Key Vault fetch exit=$exit -- using shared" -ForegroundColor DarkYellow
-    return $null
-  }
-  if ($out.StartsWith('sk_')) {
-    return $out
-  }
-  Write-Host "[key] Key Vault returned unexpected value -- using shared" -ForegroundColor DarkYellow
-  return $null
+  # Returns null — the public release expects TWAI_SK to be set in the
+  # shell before running (see $SHARED_KEY block at the top). Internal
+  # setups that want to pull from a secret store (Azure Key Vault, 1Password,
+  # AWS Secrets Manager, etc.) can replace this function's body.
 }
 
 Write-Host "===== PHASE 1: resolve sk_ key =====" -ForegroundColor Magenta

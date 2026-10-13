@@ -5,9 +5,8 @@ import Foundation
 /// Two primary surfaces today:
 /// - `createSession(_:)` — mint a LiveKit session.
 /// - `getAvatar(owner:name:)` — catalog hydrate; resolve `(owner, name)` to
-///   a playable record. Pending gateway deploy — returns `503
-///   catalogHydrateNotConfigured` until the shared service bearer lands in
-///   `twaisecretskv`.
+///   a playable record. May return `503 catalogHydrateNotConfigured` if the
+///   gateway's bridge to gen-2wai isn't configured on your deployment.
 ///
 /// Mirrors the Dart `TwaiApiRestClient` surface. Async / await throughout.
 /// Every error maps to a typed `TwaiError` case; nothing throws raw
@@ -72,9 +71,9 @@ public actor TwaiAPIClient {
     /// `GET /v1/avatars/{owner}/{name}` → resolved avatar + optional
     /// greeting.
     ///
-    /// Pending gateway deploy — returns `TwaiError.catalogHydrateNotConfigured`
-    /// (503) until the shared service bearer lands in `twaisecretskv`. Flutter
-    /// equivalent: `TwaiApiRestClient.getAvatar(owner, name)` on toolkit main.
+    /// May return `TwaiError.catalogHydrateNotConfigured` (503) if the
+    /// gateway's bridge to gen-2wai isn't configured on your deployment.
+    /// Flutter equivalent: `TwaiApiRestClient.getAvatar(owner, name)`.
     ///
     /// For `.mintProxy` credentials the request goes to the customer proxy's
     /// matching endpoint (e.g. `https://my-app.com/mint-proxy/v1/avatars/

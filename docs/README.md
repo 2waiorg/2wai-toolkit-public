@@ -13,7 +13,6 @@ Internal planning docs, pitch material, session handoffs, and design iterations 
 - [`integration_shapes.md`](integration_shapes.md) — Shape-by-shape integration patterns.
 - [`avatar_input_spec.md`](avatar_input_spec.md) — What an avatar's input assets look like.
 - [`mint_proxy_architecture.md`](mint_proxy_architecture.md) — Why you must hold `sk_` server-side and how the mint proxy pattern enforces that.
-- [`catalog_hydrate_service_bearer_install.md`](catalog_hydrate_service_bearer_install.md) — Ops recipe for the shared service bearer between twai-api gateway and gen-2wai.
 - [`voice_and_tts.md`](voice_and_tts.md) — Voice clone + TTS reference.
 - [`flutter_consumer_integration_gotchas.md`](flutter_consumer_integration_gotchas.md) — Four canonical Flutter integration traps.
 - [`mic_lifecycle_ios_livekit.md`](mic_lifecycle_ios_livekit.md) — iOS mic + LiveKit audio-session coexistence rules (what the vendored `twai_speech_to_text_patched` package exists to solve).

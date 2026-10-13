@@ -56,9 +56,8 @@ cd C:\Dev\2wai-toolkit\apps\avatar_player_lab
 
 ### What it does
 
-1. Tries to fetch `twai-api-jim-sk` from `twaisecretskv` via `az` (full path — no PATH gotcha).
-2. If Key Vault fetch fails (RBAC forbidden, network, whatever) — silently falls back to the shared toolkit-demo key (`jim-toolkit-demo` tenant, cap=20). Documented in `reference_twai_gateway_test_credentials.md`.
-3. Verifies the resolved key starts with `sk_` — bails with an error if not.
+1. Reads `TWAI_SK` from the shell env (set it to your `sk_test_...` key before running). The launcher is wired for a secret-store swap — see `Get-PersonalKey` in `run.ps1` if you want to pull from your own vault.
+2. Verifies the resolved key starts with `sk_` — bails with an error if not.
 4. Prints the SOURCE (personal / shared) + key PREFIX (first 12 chars) so you see what got used.
 5. `cd`s into the app dir (so you can launch from anywhere).
 6. Runs `flutter run` with `--dart-define=TWAI_SK=<key>` + optionally `--dart-define=DEV_MODE=1`.
