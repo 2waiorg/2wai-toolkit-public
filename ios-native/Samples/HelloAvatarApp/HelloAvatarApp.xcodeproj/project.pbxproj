@@ -96,7 +96,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					8A13B7331ADD325180CF955E = {
-						DevelopmentTeam = C48WHV6PZC;
+						DevelopmentTeam = YOUR_TEAM_ID;
 						ProvisioningStyle = Automatic;
 					};
 				};
