@@ -1,0 +1,40 @@
+# Xcode app wrapper for the HelloAvatar SPM sample.
+#
+# The sample under ../HelloAvatar is an SPM *executable*, which cannot be
+# code-signed and deployed to a physical iPhone. This target is a real iOS
+# app that consumes the local TwaiAvatarKit package, so step 5 of
+# HANDOFF_TO_MAC.md (run on device) is possible.
+#
+# Regenerate after editing:  xcodegen generate
+name: HelloAvatarApp
+options:
+  bundleIdPrefix: ai.twai
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  TwaiAvatarKit:
+    path: ../..
+
+targets:
+  HelloAvatar:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: TwaiAvatarKit
+        product: TwaiPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.twai.helloavatar
+        PRODUCT_NAME: HelloAvatar
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: C48WHV6PZC
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Sources/Info.plist

@@ -1,0 +1,523 @@
+{
+  "description": "Mint-response classification: how a token endpoint's reply becomes an enabled/disabled MintResult or a typed mint error. Derived from packages/core/src/mintHelpers.ts (mintResultFromResponse / mintResultFromFetch) and the Retry-After clamp in packages/core/src/engineTypes.ts (MintRateLimited constructor); every row below mirrors a row of the table in packages/core/tests/mintHelpers.test.ts, which was written vector-shaped for exactly this purpose. Why it is a cross-SDK contract: an identical 429 must show the same wait in every host, and a disabled avatar must never read as a failure. Row shape: `status` + `headers` + `body` in, `expect` out. `body.raw` is the JSON SOURCE TEXT the endpoint would put on the wire (the runner parses it, so malformed rows fail the way real ones do); `body.readFails` marks the one failure no body text can produce, a body that cannot be read at all (consumed or terminated), which must classify as `unreadable body` rather than as a parse failure. `bodyMustNotBeRead: true` means the STATUS ALONE decides the row and the implementation must not touch the body — a runner asserts the body was read 0 times, and every other row asserts exactly once (a real body is single-use). `detailExact` pins the wording where the wording is the contract; `detailContains` is the looser check every unavailable row carries. `via` names the entry point and DEFAULTS TO \"response\" when absent: \"response\" classifies an already-arrived response, \"fetch\" starts one step earlier from the pending request, and an implementation with only one entry point runs every row through it. `requestFailed: true` is the row where the request never produced a response at all (DNS, refused connection, TLS, CORS, abort). Two rules are decisions rather than mechanics and must not be \"cleaned up\": only an explicit `enabled: false` disables (an ABSENT flag means the endpoint does not have one, which is the livealman token endpoint), and a 429 is TERMINAL — nothing retries or reschedules it, because the server-side silent-session guard depends on hosts not retrying behind the user's back.",
+  "cases": [
+    {
+      "name": "200_enabled_true_with_url_token_room",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":true,\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"pp-krystal-42\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "pp-krystal-42"
+        }
+      }
+    },
+    {
+      "name": "200_enabled_false_is_disabled_not_an_error",
+      "comment": "Chat is turned off here. A real outcome, not a failure.",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":false}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "disabled"
+        }
+      }
+    },
+    {
+      "name": "200_no_enabled_key_is_enabled",
+      "comment": "The livealman token endpoint answers {url, token, room} with no flag. A truthiness test would read this as \"chat is turned off\" — silently, and wrongly. Only an explicit false disables.",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"alman-7\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "alman-7"
+        }
+      }
+    },
+    {
+      "name": "200_enabled_false_wins_over_a_ridealong_url_and_token",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":false,\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"ghost\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "disabled"
+        }
+      }
+    },
+    {
+      "name": "200_enabled_null_is_not_the_disabling_value",
+      "comment": "A null flag is a serializer artifact, not an operator turning chat off.",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":null,\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"r1\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "r1"
+        }
+      }
+    },
+    {
+      "name": "200_enabled_string_false_is_not_the_disabling_value",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":\"false\",\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"r1\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "r1"
+        }
+      }
+    },
+    {
+      "name": "200_absent_room_yields_empty_string",
+      "comment": "Some token endpoints let the server name the room. \"\" means \"ask the Room object once connected\", and is not an error.",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": ""
+        }
+      }
+    },
+    {
+      "name": "200_non_string_room_yields_empty_string",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":42}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": ""
+        }
+      }
+    },
+    {
+      "name": "200_unknown_forward_compat_fields_are_dropped",
+      "comment": "The result carries the four known fields and nothing else.",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"r1\",\"ttl\":900,\"region\":\"usw2\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "r1"
+        }
+      }
+    },
+    {
+      "name": "299_is_still_a_success_status",
+      "status": 299,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"edge\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "edge"
+        }
+      }
+    },
+    {
+      "name": "200_missing_token_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":true,\"url\":\"wss://lk.example.com/rtc\",\"room\":\"r1\"}"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token",
+        "detailExact": "mint response missing url/token"
+      }
+    },
+    {
+      "name": "200_missing_url_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":true,\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"r1\"}"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_missing_both_url_and_token_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":true}"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_non_string_url_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":12345,\"token\":\"jwt-header.jwt-payload.jwt-signature\"}"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_empty_string_token_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"\"}"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_null_body_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "null"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_bare_string_body_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "\"enabled\""
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_array_body_is_unavailable",
+      "status": 200,
+      "body": {
+        "raw": "[{\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\"}]"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "url/token"
+      }
+    },
+    {
+      "name": "200_html_error_page_is_a_non_json_body",
+      "comment": "A proxy error page or an HTML login redirect served with a 200.",
+      "status": 200,
+      "body": {
+        "raw": "<!doctype html>"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "non-JSON body",
+        "detailExact": "non-JSON body"
+      }
+    },
+    {
+      "name": "200_truncated_json_is_a_non_json_body",
+      "status": 200,
+      "body": {
+        "raw": "{\"url\":\"wss://lk.example.com/rtc\",\"token\":"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "non-JSON body",
+        "detailExact": "non-JSON body"
+      }
+    },
+    {
+      "name": "200_unreadable_body_is_unreadable_not_unparseable",
+      "comment": "A consumed or terminated body is a different incident from an error page, and points at the caller or the transport rather than at what the server said. Two incidents, two words.",
+      "status": 200,
+      "body": {
+        "readFails": "not-a-syntax-error"
+      },
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "unreadable body",
+        "detailExact": "unreadable body"
+      }
+    },
+    {
+      "name": "429_retry_after_598_carries_through",
+      "status": 429,
+      "headers": {
+        "Retry-After": "598"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 598
+      }
+    },
+    {
+      "name": "429_lowercase_retry_after_is_still_found",
+      "comment": "A real Headers normalizes case; a Node http adapter hands over a lowercase-keyed plain object. A case-sensitive lookup would silently degrade EVERY 429 to the fallback, and the wait would look plausible enough that nothing ever looked broken.",
+      "status": 429,
+      "headers": {
+        "retry-after": "598"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 598
+      }
+    },
+    {
+      "name": "429_no_retry_after_falls_back_to_60",
+      "status": 429,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "429_garbage_retry_after_falls_back_to_60",
+      "status": 429,
+      "headers": {
+        "Retry-After": "soon"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "429_empty_retry_after_falls_back_to_60",
+      "status": 429,
+      "headers": {
+        "Retry-After": ""
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "429_negative_retry_after_falls_back_to_60",
+      "comment": "A negative wait must never read as \"retry immediately\".",
+      "status": 429,
+      "headers": {
+        "Retry-After": "-5"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "429_zero_retry_after_falls_back_to_60",
+      "status": 429,
+      "headers": {
+        "Retry-After": "0"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "429_http_date_retry_after_falls_back_to_60",
+      "comment": "RFC 9110 allows a date instead of a delay. We do not parse it; degrading to the fallback is right, showing \"retry after NaNs\" is not.",
+      "status": 429,
+      "headers": {
+        "Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 60
+      }
+    },
+    {
+      "name": "503_is_unavailable_and_names_the_status",
+      "comment": "The body is deliberately discarded on every non-2xx: classifying from the status alone is total (it cannot itself fail, and it cannot hand a server's error prose to a host as if it were a mint result).",
+      "status": 503,
+      "body": {
+        "raw": "{\"error\":\"upstream is down\"}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "503",
+        "detailExact": "HTTP 503"
+      }
+    },
+    {
+      "name": "500_is_unavailable_and_names_the_status",
+      "status": 500,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "500",
+        "detailExact": "HTTP 500"
+      }
+    },
+    {
+      "name": "401_is_unavailable_and_names_the_status",
+      "status": 401,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "401"
+      }
+    },
+    {
+      "name": "300_is_not_a_success_status",
+      "status": 300,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "300"
+      }
+    },
+    {
+      "name": "199_is_not_a_success_status",
+      "status": 199,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "199"
+      }
+    },
+    {
+      "name": "fetch_classifies_an_ordinary_enabled_response_identically",
+      "comment": "The happy path through the other entry point. Without this row the fetch entry is only ever exercised on failures, and an implementation that forgot to return the classification at all would still pass.",
+      "via": "fetch",
+      "status": 200,
+      "body": {
+        "raw": "{\"enabled\":true,\"url\":\"wss://lk.example.com/rtc\",\"token\":\"jwt-header.jwt-payload.jwt-signature\",\"room\":\"via-fetch-1\"}"
+      },
+      "expect": {
+        "resolves": {
+          "kind": "enabled",
+          "url": "wss://lk.example.com/rtc",
+          "token": "jwt-header.jwt-payload.jwt-signature",
+          "room": "via-fetch-1"
+        }
+      }
+    },
+    {
+      "name": "fetch_a_request_that_never_produced_a_response_is_unavailable",
+      "comment": "DNS failure, connection refused, TLS error, CORS, abort — all fail before there is any response. Unclassified, this reaches the engine as a raw error with no kind, which is what the taxonomy exists to remove.",
+      "via": "fetch",
+      "requestFailed": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "mint request failed",
+        "detailExact": "mint request failed"
+      }
+    },
+    {
+      "name": "fetch_does_not_rewrap_a_429_as_a_generic_failure",
+      "comment": "The request-failure catch must span ONLY the awaited request. If it spanned classification too, a 429 with a real wait would come back as \"something went wrong\".",
+      "via": "fetch",
+      "status": 429,
+      "headers": {
+        "Retry-After": "77"
+      },
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 77
+      }
+    },
+    {
+      "name": "fetch_does_not_rewrap_an_already_typed_unavailable",
+      "via": "fetch",
+      "status": 503,
+      "body": {
+        "raw": "{}"
+      },
+      "bodyMustNotBeRead": true,
+      "expect": {
+        "throws": "mint-unavailable",
+        "detailContains": "503",
+        "detailExact": "HTTP 503"
+      }
+    }
+  ]
+}

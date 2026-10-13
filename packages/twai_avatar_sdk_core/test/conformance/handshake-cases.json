@@ -1,0 +1,38 @@
+{
+  "description": "Server-side accept/reject classification of the first WS frame on /ext-api/mse_stream. Mirrors inference_service/worker_server.py handshake handling. A conforming server (main_service/worker) MUST classify each `input` to the given `expect`. A conforming client MUST only ever send frames that classify as accept:true.",
+  "cases": [
+    {
+      "name": "valid_full",
+      "input": { "session_id": "mse-1716879600000-487213", "avatar_id": "RedJesusTalk2", "ttsSelection": "tts5", "avatarVoice": "9c32e898-e99c-4287-89a1-57f5243aa454", "stream_type": "AV" },
+      "expect": { "accept": true }
+    },
+    {
+      "name": "valid_with_protocol_version",
+      "input": { "session_id": "mse-1716879600000-487213", "avatar_id": "Gen_ab12_Casual1", "ttsSelection": "tts5", "avatarVoice": "default", "stream_type": "AV", "protocolVersion": "1.1.0" },
+      "expect": { "accept": true }
+    },
+    {
+      "name": "valid_minimal_defaults_applied",
+      "comment": "Server fills avatar_id/ttsSelection/avatarVoice/stream_type defaults; only session_id is hard-required server-side.",
+      "input": { "session_id": "mse-1716879600000-000001" },
+      "expect": { "accept": true }
+    },
+    {
+      "name": "missing_session_id",
+      "input": { "avatar_id": "RedJesusTalk2", "ttsSelection": "tts5", "avatarVoice": "default", "stream_type": "AV" },
+      "expect": { "accept": false, "closeCode": 1002 }
+    },
+    {
+      "name": "non_json",
+      "raw": "this is not json",
+      "expect": { "accept": false, "closeCode": 1002 }
+    },
+    {
+      "name": "config_timeout",
+      "comment": "No frame within HANDSHAKE_TIMEOUT_MS of open.",
+      "raw": null,
+      "timedOut": true,
+      "expect": { "accept": false, "closeCode": 1002 }
+    }
+  ]
+}

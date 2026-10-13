@@ -1,0 +1,33 @@
+name: hello_avatar
+description: "The smallest possible 2wai Avatar app on Transport 0 (LiveKit) — one screen, one TwaiTransport0Player, one send button. Reference implementation of the minimum-viable T0 embed."
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+# ═══════════════════════════════════════════════════════════════════
+# Minimum viable dependency graph — three packages.
+#
+# The umbrella twai_avatar_sdk re-exports NetworkVideoIdle + the
+# TwaiApiRestClient + credentials + error types. twai_avatar_sdk_livekit
+# provides the Transport 0 engine + TwaiTransport0Player widget.
+# twai_avatar_sdk_video_player is the native backend for NetworkVideoIdle
+# on iOS/Android (used for the silent-state MP4 loop).
+# ═══════════════════════════════════════════════════════════════════
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_livekit:
+  twai_avatar_sdk_video_player:
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

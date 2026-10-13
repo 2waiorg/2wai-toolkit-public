@@ -1,0 +1,81 @@
+name: ci
+
+# Two required jobs:
+#
+#   1. dart-tests       — every package with a test/ dir runs `dart test`.
+#                         The twai-protocol conformance runner
+#                         (packages/twai_avatar_sdk_core/test/protocol_conformance_test.dart)
+#                         is one of those tests — replays the 3 golden vectors
+#                         (codec, handshake-cases, speaking-timeline) against
+#                         the SDK's real exports. This is the Dart side of
+#                         Mason's non-bypassable conformance gate
+#                         (`spec/PROTOCOL.md:158` upstream, P5 hand-off).
+#
+#   2. codec-check      — greps every packages/ file for stray `avc1.42*`
+#                         literals that aren't the golden `42C01F`. This is
+#                         the 2026-07-07 outage guard. Ran once during
+#                         setup and immediately caught two literals in
+#                         mse_live_sink_web.dart (2026-07-28).
+#
+# Both jobs fail the build on drift. No continue-on-error.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  dart-tests:
+    name: dart test (all packages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # SDK constraint in every pubspec.yaml is `^3.6.0`. Pin here
+          # so a Flutter stable-channel rev bump can't silently move us.
+          flutter-version: '3.24.x'
+
+      - name: Workspace pub get
+        run: flutter pub get
+
+      - name: dart test — twai_avatar_sdk_core (incl. protocol conformance)
+        working-directory: packages/twai_avatar_sdk_core
+        run: dart test
+
+      - name: dart test — twai_avatar_sdk_player
+        working-directory: packages/twai_avatar_sdk_player
+        run: dart test
+
+      - name: flutter test — twai_avatar_sdk
+        working-directory: packages/twai_avatar_sdk
+        run: flutter test
+
+      - name: dart test — twai_avatar_sdk_local
+        working-directory: packages/twai_avatar_sdk_local
+        run: dart test
+
+      - name: flutter test — twai_avatar_sdk_web_mse
+        working-directory: packages/twai_avatar_sdk_web_mse
+        run: flutter test
+
+  codec-check:
+    name: codec-check (avc1 literal drift guard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Scan packages/ for non-golden avc1 literals
+        # Tool is a mirror of 2waiorg/twai-protocol/tools/codec-check.mjs.
+        # Golden = avc1.42C01F (baseline). Any other 42XXXX literal in
+        # a .dart / .js / .ts / .json / .py file fails the build.
+        run: node tools/codec-check.mjs packages/

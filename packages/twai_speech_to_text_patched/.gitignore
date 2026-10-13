@@ -1,0 +1,11 @@
+# Gradle build cache — generated per-build, must not be committed.
+android/.gradle/
+android/gradle/.gradle/
+
+# Build output
+android/build/
+build/
+
+# Flutter / Dart tool cache
+.dart_tool/
+.packages

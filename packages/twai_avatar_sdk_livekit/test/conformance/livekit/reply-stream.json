@@ -1,0 +1,1213 @@
+{
+  "description": "The `2wai.reply` reducer: a strict in-order stream of protocol frames in, an ordered start/text/complete event log out. Derived from packages/core/src/replyStream.ts and the eleven production-fixture tests in packages/core/tests/replyStream.test.ts. The producer is clg_pp_payment `vm-mirror/wav2lip-training/home/azureuser/livealman-host/brain_llm.py` (origin/staging) `BrainStream._emit_reply`, which emits exactly {v, reply_id, seq, kind, text?} with kind in start|delta|end|cancel|error, seq starting at 0 on the start frame, and the terminal frame carrying the full accumulated text as its authoritative value. Four rules are decisions rather than mechanics: (1) a frame is accepted only if its reply_id is the active one AND its seq is exactly the next expected one, so a duplicate, a stale reply, and an out-of-order delta all drop; (2) a terminal frame's own text REPLACES the accumulated buffer, which is how a missed delta repairs itself; (3) Voice Expression tags are stripped at one chokepoint (the accumulate step), so the buffer, the text events and the completion are clean by construction and a future callback cannot forget to strip — the vocabulary is EXACT, never a greedy bracket sweep, because a greedy sweep eats [CARD: ...] chips and [email] PII placeholders; (4) `sawProtocol` LATCHES on any well-formed frame, including one the gate then drops, and it is what makes the protocol supersede fallback transcription (packages/core/src/engine.ts, consumeFallbackTranscription). THE SPLIT-TAG CONTRACT, because it is the one thing here that looks like a bug and is not. Stripping happens per CHUNK, so a tag split across two deltas (\"[fli\" then \"rty] hi\") matches neither chunk and leaks into the text events until the reply completes. That is deliberate, and it rests on three things: (a) the PRODUCER guarantee — clg_pp_payment `livealman-host/brain_llm.py` `_run()` always emits the terminal frame with `text=\"\".join(self._reply_text)`, the whole reply, on every exit path (end, cancel, error); (b) tags not spanning deltas is a producer property, not something a consumer can enforce — the brain emits a tag inside one SSE delta; (c) the terminal frame's authoritative text is therefore the BACKSTOP: it is stripped as a whole, so the split tag is repaired at completion and the persisted/final copy is always clean. A reducer that buffered instead, to strip only across a complete reply, would trade a transient flicker for waiting on the whole reply before painting anything — the exact latency the delta stream exists to avoid. The scenario below encodes the OBSERVABLE behaviour so a Dart port reproduces it rather than \"fixing\" it into a divergence. One constraint that cannot be commented in the frozen source: the tag vocabulary is interpolated straight into a RegExp alternation, so every entry must stay free of regex metacharacters. A tag containing `(`, `.`, `[`, `+` or `?` would silently change what the pattern matches, or throw at module load. Spaces are fine (\"low voice\", \"breathes deeply\"). Scenario shape: `frames` is replayed in order. Two entries are directives rather than frames: `{\"op\": \"reset\"}` is the reset a new outbound turn performs, and `{\"op\": \"keepTags\", \"value\": <bool>}` flips the admin-review flag MID-STREAM (it is a live closure, read on every strip, not a value snapshotted at construction). `expectEvents` is the exact ordered event log. `expectAccepted` (optional) pins the per-entry accept/reject verdict, with null in the slot of a directive. `keepTags` sets the starting value and DEFAULTS TO false; it is display only, and the only thing it changes is whether direction tags survive into the text.",
+  "scenarios": [
+    {
+      "name": "each_delta_renders_immediately_before_completion",
+      "comment": "The bubble grows as the brain streams; nothing waits for the terminal.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "I app"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "reciate that."
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 3,
+          "kind": "end",
+          "text": "I appreciate that."
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "I app"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "I appreciate that."
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "I appreciate that.",
+          "kind": "end"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "stale_duplicate_and_out_of_order_frames_are_ignored",
+      "comment": "seq 2 arrives before seq 1, seq 1 arrives twice, and a frame from a previous reply arrives late. Only the one in-order delta lands.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "late"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "right"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "dup"
+        },
+        {
+          "v": 1,
+          "reply_id": "old",
+          "seq": 2,
+          "kind": "delta",
+          "text": "stale"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "right"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        false,
+        true,
+        false,
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_retransmitted_delta_does_not_double_the_text",
+      "comment": "Redelivery on the data channel is a real event, and the seq is the only thing that distinguishes \"said it again\" from \"sent it again\". Without the seq gate the bubble reads \"HelloHello\".",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Hello"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Hello"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": " there"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hello"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hello there"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        false,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "authoritative_end_text_repairs_a_missed_delta",
+      "comment": "The terminal frame carries the whole reply, so a delta lost on the wire is repaired at completion instead of leaving a truncated bubble.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Hello "
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "end",
+          "text": "Hello there."
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hello "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hello there."
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "Hello there.",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_terminal_that_matches_the_buffer_emits_no_repair_text",
+      "comment": "The repair text event fires only when the authoritative text actually differs. An interrupted turn must not repaint an identical bubble.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Hello there."
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "end",
+          "text": "Hello there."
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hello there."
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "Hello there.",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_terminal_without_text_completes_on_the_accumulated_buffer",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Hi "
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "there"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 3,
+          "kind": "end"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hi "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hi there"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "Hi there",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "cancel_closes_the_bubble_and_refuses_later_stale_text",
+      "comment": "The user interrupted. The partial reply stays on screen, closed out as cancelled, and a delta still in flight cannot reopen it.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "Partial"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "cancel",
+          "text": "Partial"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 3,
+          "kind": "delta",
+          "text": " stale"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Partial"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "Partial",
+          "kind": "cancel"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "error_is_a_terminal_kind_and_keeps_what_arrived",
+      "comment": "The brain failed mid-turn. What was already said is kept and closed out as an error, not silently dropped and not left open forever.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "I was saying"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "error",
+          "text": "I was saying"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "I was saying"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "I was saying",
+          "kind": "error"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_start_whose_seq_is_not_zero_is_refused",
+      "comment": "A start IS seq 0 — brain_llm.py emits it first, before any increment. A start at another seq is a stream we joined mid-flight, and opening a bubble on it would render half a reply as if it were whole.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "start"
+        }
+      ],
+      "expectEvents": [],
+      "expectAccepted": [
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_delta_with_no_active_reply_is_refused",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "orphan"
+        }
+      ],
+      "expectEvents": [],
+      "expectAccepted": [
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "an_empty_delta_is_refused_but_still_consumes_its_sequence_number",
+      "comment": "It carried nothing to render, so nothing is emitted — but it WAS the frame at the expected position, so the stream must advance past it. Not consuming the seq would put every later frame off by one and drop the rest of the reply.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": ""
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "ok"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "ok"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        false,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_second_start_supersedes_the_first_reply",
+      "comment": "A new turn opened while the previous one was still streaming.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "first"
+        },
+        {
+          "v": 1,
+          "reply_id": "r2",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r2",
+          "seq": 1,
+          "kind": "delta",
+          "text": "second"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "first again"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "first"
+        },
+        {
+          "event": "start",
+          "replyId": "r2"
+        },
+        {
+          "event": "text",
+          "replyId": "r2",
+          "text": "second"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "malformed_frames_are_refused_and_never_latch_the_protocol",
+      "comment": "The latch decides whether fallback transcription is suppressed. Junk on the topic must not be able to silence the fallback path.",
+      "frames": [
+        {
+          "v": 2,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": -1,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0.5,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "bogus"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start",
+          "text": 42
+        },
+        {
+          "v": 1,
+          "seq": 0,
+          "kind": "start"
+        }
+      ],
+      "expectEvents": [],
+      "expectAccepted": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "expectSawProtocol": false
+    },
+    {
+      "name": "a_well_formed_frame_that_is_dropped_still_latches_the_protocol",
+      "comment": "The agent IS speaking the protocol; we simply joined late. Falling back to transcription here would double every reply.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 7,
+          "kind": "delta",
+          "text": "mid-stream"
+        }
+      ],
+      "expectEvents": [],
+      "expectAccepted": [
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "reset_clears_the_protocol_latch",
+      "comment": "Reset is what a new outbound turn does before publishing (engine.ts send()). Clearing the latch matters because the NEXT reply may well arrive as a plain transcription; a latch that survived would suppress the fallback path for the rest of the session.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "partial"
+        },
+        {
+          "op": "reset"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "partial"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        null
+      ],
+      "expectSawProtocol": false
+    },
+    {
+      "name": "reset_abandons_the_active_reply",
+      "comment": "The previous stream is no longer active, so its remaining frames drop — but note the latch: the dropped frame is still WELL-FORMED, so it re-latches sawProtocol on its way to being refused. Reset clears the latch; it does not keep it clear.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "partial"
+        },
+        {
+          "op": "reset"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "more"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "partial"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        null,
+        false
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_reply_started_after_reset_streams_normally",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "partial"
+        },
+        {
+          "op": "reset"
+        },
+        {
+          "v": 1,
+          "reply_id": "r2",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r2",
+          "seq": 1,
+          "kind": "delta",
+          "text": "fresh"
+        },
+        {
+          "v": 1,
+          "reply_id": "r2",
+          "seq": 2,
+          "kind": "end",
+          "text": "fresh"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "partial"
+        },
+        {
+          "event": "start",
+          "replyId": "r2"
+        },
+        {
+          "event": "text",
+          "replyId": "r2",
+          "text": "fresh"
+        },
+        {
+          "event": "complete",
+          "replyId": "r2",
+          "text": "fresh",
+          "kind": "end"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        null,
+        true,
+        true,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "every_expression_tag_in_the_vocabulary_is_stripped",
+      "comment": "The full allowlist, verbatim from packages/core/src/replyStream.ts, whose source of truth is avatar-brain src/core/expression.py ALLOWLIST. A tag missing from an implementation survives into the text and fails this row. Twenty-three base-tier tags any avatar can emit, then seven adult-tier tags only adult-classed avatars emit.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[happy][delighted][excited][curious][calm][sad][fearful][surprised][teasing][playful][warm][gentle][serious][confident][laughs][giggles][sighs][gasps][breathes deeply][whispering][softly][low voice][shouting][flirty][breathy][moans][sultry][sensual][seductive][aroused]Hey there"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "end"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hey there"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "Hey there",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "tag_matching_is_case_insensitive_and_eats_trailing_whitespace",
+      "comment": "The brain does not guarantee casing. The whitespace that followed the tag goes with it, so a stripped reply does not open with a space.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[FLIRTY] come here. "
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "[Laughs]   you are terrible."
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "come here. "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "come here. you are terrible."
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_terminal_frames_own_authoritative_text_is_stripped_too",
+      "comment": "The repair path has to strip as well, or a tag reaches the feed only on replies that got repaired — the hardest kind of leak to notice.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "end",
+          "text": "[moans] mmm, hi"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "mmm, hi"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "mmm, hi",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "card_chips_and_pii_placeholders_survive_with_tags_stripped",
+      "comment": "The lean app renders [CARD: ...] as a tap chip and [email] is a PII placeholder. A greedy \\[[^\\]]*\\] sweep would eat both — which is why the strip is an exact vocabulary.",
+      "keepTags": false,
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[flirty]mail me at [email] [CARD: buy] ok"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "mail me at [email] [CARD: buy] ok"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "card_chips_and_pii_placeholders_survive_with_tags_kept",
+      "keepTags": true,
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[flirty]mail me at [email] [CARD: buy] ok"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "[flirty]mail me at [email] [CARD: buy] ok"
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "keep_tags_off_is_the_default_and_strips",
+      "keepTags": false,
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[happy] Hey. "
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "[serious] Bad news."
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hey. "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "Hey. Bad news."
+        }
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "a_tag_split_across_two_deltas_leaks_transiently_and_is_repaired_at_completion",
+      "comment": "See THE SPLIT-TAG CONTRACT above. \"[fli\" matches nothing and \"rty] hi\" contains no \"[\" at all, so the joined buffer carries a visible \"[flirty] hi\" for one frame; the terminal frame's authoritative text is stripped as a whole and repairs it. The third text event IS the repair — an implementation that only emitted the completion would leave the leaked copy on screen.",
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[fli"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "rty] hi"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 3,
+          "kind": "end",
+          "text": "[flirty] hi"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "[fli"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "[flirty] hi"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "hi"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "hi",
+          "kind": "end"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "keep_tags_toggled_mid_stream_takes_effect_on_the_next_delta",
+      "comment": "An admin flips review mode on while a reply is streaming. The flag is a closure the reducer calls on every strip, not a boolean captured when it was constructed — an implementation that snapshotted it would keep stripping here and the toggle would appear dead until the next session.",
+      "keepTags": false,
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[happy] a "
+        },
+        {
+          "op": "keepTags",
+          "value": true
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "delta",
+          "text": "[flirty] b"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "a "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "a [flirty] b"
+        }
+      ],
+      "expectAccepted": [
+        true,
+        true,
+        null,
+        true
+      ],
+      "expectSawProtocol": true
+    },
+    {
+      "name": "keep_tags_on_is_the_admin_review_path",
+      "comment": "Display only, so the tagging can be judged in a real session. It does not change what the stream accepts, only what the text carries.",
+      "keepTags": true,
+      "frames": [
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 0,
+          "kind": "start"
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 1,
+          "kind": "delta",
+          "text": "[happy] Hey. "
+        },
+        {
+          "v": 1,
+          "reply_id": "r1",
+          "seq": 2,
+          "kind": "end",
+          "text": "[moans] mmm, hi"
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "start",
+          "replyId": "r1"
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "[happy] Hey. "
+        },
+        {
+          "event": "text",
+          "replyId": "r1",
+          "text": "[moans] mmm, hi"
+        },
+        {
+          "event": "complete",
+          "replyId": "r1",
+          "text": "[moans] mmm, hi",
+          "kind": "end"
+        }
+      ],
+      "expectSawProtocol": true
+    }
+  ]
+}

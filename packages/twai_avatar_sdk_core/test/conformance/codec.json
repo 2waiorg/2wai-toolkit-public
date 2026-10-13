@@ -1,0 +1,6 @@
+{
+  "description": "Golden codec facts every client must agree on. A conforming client declares its compiled-in codec constant + the avcC profile_compatibility byte it accepts; the harness asserts byte-for-byte equality. This is the single check that would have caught the 2026-07-07 outage class (a 42E01F vs 42C01F drift leaves <video> stuck at HAVE_METADATA).",
+  "mseCodecs": "video/mp4; codecs=\"avc1.42C01F, mp4a.40.2\"",
+  "avccProfileCompatByte": 192,
+  "avccProfileCompatHex": "0xC0"
+}

@@ -1,0 +1,12 @@
+name = "twai-mint-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Runtime vars. Override per-env with `wrangler.toml` env sections or
+# `wrangler deploy --var ALLOWED_ORIGIN=https://myapp.com`.
+[vars]
+UPSTREAM = "https://twai-api.purpleglacier-ffec85d8.westus2.azurecontainerapps.io"
+ALLOWED_ORIGIN = "*"
+
+# SK_KEY is a secret, not a var. Set via:
+#   wrangler secret put SK_KEY

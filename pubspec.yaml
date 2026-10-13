@@ -1,0 +1,64 @@
+name: _2wai_toolkit
+description: "Workspace root for the 2wai Toolkit — Flutter SDK packages + example apps. Not published."
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+
+workspace:
+  - packages/twai_avatar_sdk_core
+  - packages/twai_avatar_sdk
+  - packages/twai_avatar_sdk_video_player
+  - packages/twai_avatar_sdk_player
+  - packages/twai_avatar_sdk_web_mse
+  - packages/twai_avatar_sdk_livekit
+  - apps/avatar_only_flutter
+  - apps/avatar_player_lab
+  - apps/embed
+  - apps/hello_avatar
+  - apps/twai_api_demo
+  - apps/twai_api_starter
+
+# iOS receive-only audio — REVERTED to the Lumara-proven pin (local, 2026-09-08).
+#
+# livekit_client 2.9.0 introduced "engine-driven native lifecycle" AudioManager
+# which activates the iOS AVAudioSession from the audio-engine lifecycle. The
+# engine only starts when a microphone track is published, so receive-only
+# avatars (no mic → default for the whole toolkit) decode audio to silence on
+# real iPhones.
+#
+# 1fa1d63 removed this pin in favour of engine.dart::_ensureReceiveOnlyPlayout
+# (AudioManager.setAudioSessionOptions(mediaPlayback())). But
+# docs/livekit_ios_receive_only_audio.md lists that exact call under "Did NOT
+# work on 2.9+ (tried)", and that doc was not updated — it still says "keep the
+# pin". Reverting to the configuration Lumara actually shipped to TestFlight and
+# verified on this iPhone, per the Lumara session's livekit-ios-audio-regression
+# notes.
+#
+# 2.8.1 needs WebRTC-SDK pod 144.7559.09 → wipe ios/Pods + ios/Podfile.lock and
+# `pod install --repo-update`. engine.dart is reverted alongside this: the 2.9+
+# AudioManager APIs do not exist in 2.8.1 and will not compile.
+dependency_overrides:
+  livekit_client: 2.8.1
+  flutter_webrtc: 1.4.0
+  # iOS mic + LiveKit coexistence — vendored `speech_to_text` 7.4.0 with the
+  # Lumara Darwin patch (2026-09-19). Upstream `speech_to_text` unconditionally
+  # calls `AVAudioSession.setActive(false)` on stop; that also tears down
+  # LiveKit's process-wide playout unit, so the avatar goes silent the moment
+  # the user commits their first mic turn.
+  #
+  # The vendored copy remembers the pre-recognition category / options / mode
+  # and, when the category was a media-shape session (.playback /
+  # .playAndRecord / .multiRoute), restores the config and leaves the session
+  # active. Ordinary standalone STT keeps the upstream deactivation behavior.
+  #
+  # Path C (durable): upstream PR to csdcorp/speech_to_text exposing a
+  # session-preserve option — tracked as follow-up in
+  # docs/mic_lifecycle_ios_livekit.md. Until that lands and ships, this
+  # override is load-bearing.
+  #
+  # Package identity inside twai_speech_to_text_patched/pubspec.yaml is still
+  # `speech_to_text` (version 7.4.0+lumara.1) so the override slots into any
+  # transitive dep resolution.
+  speech_to_text:
+    path: packages/twai_speech_to_text_patched

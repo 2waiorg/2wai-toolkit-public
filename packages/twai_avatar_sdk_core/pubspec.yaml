@@ -1,0 +1,17 @@
+name: twai_avatar_sdk_core
+description: "Pure-Dart core for the 2wai avatar SDK — transport clients, sessions, admin API. No Flutter dependency; runnable from any Dart context (CLI tools, server, browser, anything)."
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  http: ^1.2.0
+  web_socket_channel: ^3.0.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

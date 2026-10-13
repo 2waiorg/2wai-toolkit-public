@@ -1,0 +1,7 @@
+# The real config with your sk_ key. Never commit.
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/

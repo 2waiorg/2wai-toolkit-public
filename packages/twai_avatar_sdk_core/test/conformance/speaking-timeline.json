@@ -1,0 +1,42 @@
+{
+  "description": "The pts-gating invariant, the single most bug-prone client behavior. Speaking events arrive over the WS near-instantly, but the player's playback head lags the latest appended fragment by 0.5-1.5s. A conforming client MUST fire its idle<->speaking UI transition when playbackTime >= pts, in event order, NOT on event receipt. Each scenario feeds `events` (with arrival order) against a `playback` currentTime progression; the client must reproduce `expectedFires` exactly.",
+  "scenarios": [
+    {
+      "name": "basic_start_stop_with_lag",
+      "comment": "Events arrive ~1s before the playhead reaches their pts. Fire is gated on currentTime.",
+      "events": [
+        { "seq": 0, "type": "speaking", "value": "start", "pts": 2.34 },
+        { "seq": 1, "type": "speaking", "value": "stop", "pts": 7.81 }
+      ],
+      "playback": [1.0, 1.5, 2.0, 2.34, 3.0, 6.0, 7.0, 7.8, 7.81, 8.5],
+      "expectedFires": [
+        { "value": "start", "firedAtCurrentTime": 2.34 },
+        { "value": "stop", "firedAtCurrentTime": 7.81 }
+      ]
+    },
+    {
+      "name": "both_events_already_passed",
+      "comment": "If the playhead is already past both pts by the time we sample, both fire in order on the first tick.",
+      "events": [
+        { "seq": 0, "type": "speaking", "value": "start", "pts": 2.0 },
+        { "seq": 1, "type": "speaking", "value": "stop", "pts": 3.0 }
+      ],
+      "playback": [5.0, 6.0],
+      "expectedFires": [
+        { "value": "start", "firedAtCurrentTime": 5.0 },
+        { "value": "stop", "firedAtCurrentTime": 5.0 }
+      ]
+    },
+    {
+      "name": "legacy_no_pts_fires_immediately",
+      "comment": "Pre-2026-05 workers omit pts. A conforming client falls back to firing on receipt (currentTime of the tick it was received on).",
+      "events": [
+        { "seq": 0, "type": "speaking", "value": "start" }
+      ],
+      "playback": [0.4],
+      "expectedFires": [
+        { "value": "start", "firedAtCurrentTime": 0.4 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+name: twai_avatar_sdk_livekit
+description: >-
+  LiveKit (WebRTC) transport for the 2wai Avatar SDK — Adapter 5. Wraps
+  livekit_client with the SDK's ChatSession + VideoSink contracts so
+  TwaiPlayerHandle.forLiveKitSession() drops into any existing app
+  the same way forApiSession() and the default MSE constructor do.
+
+  The wire is a Dart port of `clg_penthouse_pets/frontend/src/lean/
+  livekit_transport.ts` (Mason's PenthouseLiveKitTransport). Same
+  topic names (`lk.chat`, `livealman`, `2wai.reply`, `2wai.control`,
+  `lk.transcription`), same reply-frame protocol, same warming→ready
+  state machine with a SEND_GRACE_MS post-first-video-track delay.
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.24.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_core:
+  twai_avatar_sdk_player:
+  # LiveKit's Flutter client. Handles the WebRTC handshake, ICE, DTLS,
+  # room + participant + track model, and the DataReceived / TextStream
+  # transports the reply protocol rides on.
+  #
+  # >= 2.9.0 required for `AudioManager.setAudioSessionOptions` +
+  # `AudioSessionOptions.mediaPlayback` — used by engine.dart's
+  # `_ensureReceiveOnlyPlayout` to activate the iOS AVAudioSession for
+  # receive-only sessions (see docs/livekit_ios_receive_only_audio.md).
+  livekit_client: ^2.9.0
+  # Used by Transport 0's engine to mint uuid-v4 request_ids for the
+  # lk.chat envelope (matches Mason's `crypto.randomUUID()`).
+  uuid: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

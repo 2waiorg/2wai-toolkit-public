@@ -1,0 +1,25 @@
+name: twai_avatar_sdk_player
+description: >-
+  2wai Avatar Player — the SDK's canonical player, modeled after the
+  Penthouse player. Provides TwaiAvatarPlayerController (imperative
+  state-machine controller) and TwaiPlayerHandle (the developer-facing
+  facade that auto-fetches gestures / frames / progress and disciplines
+  send-time fanout so an app never writes HTTP for standard flows).
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  twai_avatar_sdk_core:
+  # HTTP client for the /api/* endpoints (gamification, catalog, chat
+  # gate) — the facade fires these in parallel with the pipeline WS
+  # so the app doesn't have to. TwaiApiClient wraps them.
+  http: ^1.2.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

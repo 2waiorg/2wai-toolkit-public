@@ -1,0 +1,266 @@
+{
+  "description": "Host-side retry policy: the pure state machine in packages/core/src/roomLifecycle.ts (LiveKitRoomLifecycle), mirroring the six tests in packages/core/tests/roomLifecycle.test.ts. This is a HELPER, not engine behaviour, and the distinction is the point: per spec §10 the engine performs NO retries — it classifies an ending, emits it, and stops. Retry lives here so a policy bug is fixed in one host without a package release, and so the server-side guards see honest client behaviour. This is the policy Penthouse Pets settled on after an auto-reconnecting client opened 864 sessions in 48 hours; a host that wants different policy simply does not use the class. It is vectored because the admission rules ARE the incident fix, and a Dart port that got the latch wrong would reproduce the incident rather than the fix. Four rules are decisions: (1) `agent-ended` never auto-retries — it returns await-user and does NOT spend an attempt, because a departed renderer means the slot went somewhere and hammering it just burns the budget; (2) `rate-limited` LATCHES, so every later failure is blocked until a real user gesture clears it, which is what stops a 429 from becoming a retry loop; (3) installing a replacement owner does NOT reset the episode, but the new room actually RENDERING does — reaching a renderer is the only evidence that a retry worked; (4) `release` is owner-gated and serialises on a disconnect barrier, so a stale owner cannot tear down its replacement and a host cannot mint a new room while the old one is still billing. ADMISSION CONTROL ONLY: a counter and a latch. No backoff, no timers — pacing a retry is host code, and nothing here sleeps. Scenario shape: `steps` is replayed in order against one instance built with `maxAutomaticRetries` (default 3). Owners are named by STRING, and the runner maps each distinct name to a distinct object identity — that is how the identity semantics (`isCurrent`, the stale-owner rules) get expressed without putting object references in JSON. `expectResults` is the per-step return value, null for steps that return nothing. `expectFinal` reports the instance getters plus a per-owner count of how many times its disconnect callback actually ran. `expectOrder` is for the one scenario about ordering.",
+  "scenarios": [
+    {
+      "name": "a_replacement_waits_for_the_owned_room_disconnect_barrier",
+      "comment": "The ordering that protects the participant-minute budget: the old room must be fully down before a host mints its replacement. A host that fetched a token first would hold two rooms, both billing. `gated` makes the disconnect hang until `openGate`, so \"waited\" is distinguishable from \"happened to be fast\".",
+      "steps": [
+        {
+          "install": "A"
+        },
+        {
+          "release": "A",
+          "disconnect": "gated"
+        },
+        {
+          "raceWaitForDisconnect": "token-fetch"
+        },
+        {
+          "openGate": true
+        }
+      ],
+      "expectResults": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "expectOrder": [
+        "disconnect-start",
+        "disconnect-end",
+        "token-fetch"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 0,
+        "isRateLimited": false,
+        "disconnects": {
+          "A": 1
+        }
+      }
+    },
+    {
+      "name": "only_three_automatic_terminal_replacements_are_admitted",
+      "comment": "The bound is the whole point; the fourth failure is refused.",
+      "maxAutomaticRetries": 3,
+      "steps": [
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        }
+      ],
+      "expectResults": [
+        "retry",
+        "retry",
+        "retry",
+        "blocked"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 3,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "the_retry_bound_is_the_constructed_one",
+      "comment": "Pins that maxAutomaticRetries is honoured rather than hardcoded at 3 — a port that ignored the argument passes the row above and fails here.",
+      "maxAutomaticRetries": 1,
+      "steps": [
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        }
+      ],
+      "expectResults": [
+        "retry",
+        "blocked"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 1,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "installing_a_replacement_does_not_reset_the_episode_but_rendering_does",
+      "comment": "Swapping in a new room is not evidence that anything got better; only a renderer actually painting is. Resetting on install would make the attempt bound unreachable and restore the 864-session behaviour.",
+      "steps": [
+        {
+          "install": "A"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "install": "B"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "noteRendererReady": "B"
+        }
+      ],
+      "expectResults": [
+        null,
+        "retry",
+        null,
+        "retry",
+        true
+      ],
+      "expectFinal": {
+        "automaticAttempts": 0,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "a_stale_owner_cannot_reset_the_episode_by_reporting_a_renderer",
+      "comment": "The old room finishing its warmup after it was replaced is a real race. It reports false and changes nothing.",
+      "steps": [
+        {
+          "install": "A"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "install": "B"
+        },
+        {
+          "noteRendererReady": "A"
+        }
+      ],
+      "expectResults": [
+        null,
+        "retry",
+        null,
+        false
+      ],
+      "expectFinal": {
+        "automaticAttempts": 1,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "agent_ended_waits_for_explicit_user_action_instead_of_auto_respawning",
+      "comment": "And it spends NO attempt: the episode budget is for transport failures, which a retry can plausibly fix.",
+      "steps": [
+        {
+          "noteTerminalFailure": "agent-ended"
+        },
+        {
+          "beginExplicitEpisode": true
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        }
+      ],
+      "expectResults": [
+        "await-user",
+        null,
+        "retry"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 1,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "a_rate_limit_latches_and_blocks_the_episode_until_a_user_gesture",
+      "comment": "The one that matters most. Without the latch a 429 becomes a retry loop against a server that is already telling us to stop.",
+      "steps": [
+        {
+          "noteTerminalFailure": "rate-limited"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        },
+        {
+          "beginExplicitEpisode": true
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        }
+      ],
+      "expectResults": [
+        "blocked",
+        "blocked",
+        null,
+        "retry"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 1,
+        "isRateLimited": false
+      }
+    },
+    {
+      "name": "the_rate_limit_latch_survives_a_replacement_owner",
+      "comment": "The latch is episode state, not room state. A host that swapped rooms to escape it would be doing exactly what it exists to prevent.",
+      "steps": [
+        {
+          "install": "A"
+        },
+        {
+          "noteTerminalFailure": "rate-limited"
+        },
+        {
+          "install": "B"
+        },
+        {
+          "noteTerminalFailure": "transport-ended"
+        }
+      ],
+      "expectResults": [
+        null,
+        "blocked",
+        null,
+        "blocked"
+      ],
+      "expectFinal": {
+        "automaticAttempts": 0,
+        "isRateLimited": true
+      }
+    },
+    {
+      "name": "a_stale_owner_cannot_release_a_replacement",
+      "comment": "Release is owner-gated. The old mount calling release after it was replaced must not tear down the room the user is currently looking at.",
+      "steps": [
+        {
+          "install": "A"
+        },
+        {
+          "install": "B"
+        },
+        {
+          "release": "A"
+        },
+        {
+          "isCurrent": "B"
+        },
+        {
+          "release": "B"
+        }
+      ],
+      "expectResults": [
+        null,
+        null,
+        null,
+        true,
+        null
+      ],
+      "expectFinal": {
+        "disconnects": {
+          "A": 0,
+          "B": 1
+        }
+      }
+    }
+  ]
+}

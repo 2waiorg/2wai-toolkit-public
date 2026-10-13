@@ -1,0 +1,25 @@
+{
+  "name": "@2wai/web-component-t0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JS/TS T0 (LiveKit) <twai-avatar-t0> custom element for the 2wai Avatar Toolkit. Transitional: intended for use until upstream @twai/web-component ships its T0 shape (twai-web-sdk PR #3 → sub-project 3). Consumes @twai/core's engine surface unmodified.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "dependencies": {
+    "@twai/core": "file:../../../twai-web-sdk/packages/core",
+    "@twai/mic": "file:../../../twai-web-sdk/packages/mic",
+    "livekit-client": "^2.21.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

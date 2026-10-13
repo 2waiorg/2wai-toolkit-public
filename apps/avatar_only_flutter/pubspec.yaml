@@ -1,0 +1,25 @@
+name: avatar_only_flutter
+description: "Public reference for the avatar-only pattern on Flutter: 2wai avatar over Transport 0 (LiveKit) + customer-held brain over mint proxy. Includes mock_candy_brain/server.py as a reference brain. The architectural twin of apps/avatar_only_web (archived MSE version; T0 web rebuild TBD)."
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_livekit:
+  twai_avatar_sdk_video_player:
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

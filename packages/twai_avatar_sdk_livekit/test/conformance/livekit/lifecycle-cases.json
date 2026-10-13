@@ -1,0 +1,457 @@
+{
+  "description": "Session lifecycle: an ordered timeline of room events and timer expiries in, a final state plus the terminal cause, the operator notices, and the indicator transitions out. Derived from packages/core/src/engine.ts and its scenarios in packages/core/tests/engine.test.ts. The rule the whole file exists to hold: THE ENGINE NEVER RECONNECTS. It classifies the ending, emits it once, and stops — retry is host policy (packages/core/src/roomLifecycle.ts is the policy offered, never run on a host's behalf). That is the fix for an incident in which an auto-reconnecting client opened 864 sessions in 48 hours, so an implementation that quietly rejoins here is not a nicer client, it is the incident. The two terminal causes are NOT interchangeable and hosts branch on them: `agent-ended` is the renderer agent leaving a room that is otherwise fine (retry may get a different slot), `transport-ended` is the room itself dropping under a live session. An explicit host teardown emits NO `ended` at all — the host already knows. The two notices are advisory and terminate nothing: `sessions-busy` is the agent-join deadline passing with no renderer in the room (every GPU slot is taken), `renderer-timeout` is an agent that joined but never painted a frame. Both leave the session exactly where it was, because the agent can still arrive afterwards. Timings, from engine.ts: 10s agent-join deadline, 45s renderer deadline, 1.2s settle window between the first video frame and `ready`. The settle window is why `ready` is not the instant a track subscribes. Case shape: `mint` overrides what the injected mint closure resolves or throws (default: enabled, room \"conf-minted-room\"); `agentPresentAtJoin` lists participants already in the room when the join completes; `agentIdentityPrefix` overrides which identities count as the renderer; `timeline` is replayed in order, each entry either `{\"emit\": <room event>}` or `{\"fire\": <ms>}` (expire every pending timer registered for exactly that delay) or `{\"do\": \"disconnect\"}`. A runner reports only the fields a case declares in `expect`. The LiveKit Room reports its name as \"conf-livekit-room\", deliberately different from the minted name: `warming` #1 and `roomName` carry what the TOKEN was minted for (hosts correlate spend against it), and every later status carries what the Room object says, so only distinct fixtures can catch a mix-up.",
+  "livekitRoomName": "conf-livekit-room",
+  "defaultMint": {
+    "kind": "enabled",
+    "url": "wss://livekit.test",
+    "token": "signed-token",
+    "room": "conf-minted-room"
+  },
+  "cases": [
+    {
+      "name": "an_agent_already_in_the_room_at_join_skips_the_join_deadline",
+      "comment": "The slot was free. Nothing is waiting on a 10s join, so that notice can never fire; the engine goes straight to waiting on the renderer.",
+      "agentPresentAtJoin": [
+        "livealman-agent-1"
+      ],
+      "timeline": [
+        {
+          "fire": 10000
+        },
+        {
+          "fire": 45000
+        }
+      ],
+      "expect": {
+        "connectResult": "connected",
+        "finalState": "warming",
+        "notices": [
+          "renderer-timeout"
+        ],
+        "endedCause": null
+      }
+    },
+    {
+      "name": "an_agent_arriving_before_the_deadline_cancels_sessions_busy",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "fire": 10000
+        }
+      ],
+      "expect": {
+        "finalState": "warming",
+        "notices": [],
+        "endedCause": null
+      }
+    },
+    {
+      "name": "an_agent_that_never_arrives_notices_sessions_busy_and_does_not_end",
+      "comment": "Every renderer slot is taken. The notice is advisory: the session stays joined, because the agent can still turn up and a teardown here would throw away a room the user is still looking at.",
+      "timeline": [
+        {
+          "fire": 10000
+        }
+      ],
+      "expect": {
+        "finalState": "joining",
+        "notices": [
+          "sessions-busy"
+        ],
+        "endedCause": null,
+        "isReady": false
+      }
+    },
+    {
+      "name": "an_agent_that_never_paints_notices_renderer_timeout_and_does_not_end",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "fire": 45000
+        }
+      ],
+      "expect": {
+        "finalState": "warming",
+        "notices": [
+          "renderer-timeout"
+        ],
+        "endedCause": null
+      }
+    },
+    {
+      "name": "the_happy_path_settles_to_ready_after_the_grace_window",
+      "comment": "Note WHICH room name each status carries: warming #1 is the minted name, ready is the name the Room object reports.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "audio"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "fire": 1200
+        }
+      ],
+      "expect": {
+        "finalState": "ready",
+        "isReady": true,
+        "notices": [],
+        "endedCause": null,
+        "warmingRooms": [
+          "conf-minted-room"
+        ],
+        "readyRooms": [
+          "conf-livekit-room"
+        ],
+        "roomName": "conf-minted-room"
+      }
+    },
+    {
+      "name": "a_video_track_alone_readies_the_session_and_disarms_the_join_notice",
+      "comment": "The renderer can publish before its participant-connected is dispatched. Once ready, the 10s join deadline finds nothing to complain about.",
+      "timeline": [
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "fire": 1200
+        },
+        {
+          "fire": 10000
+        },
+        {
+          "fire": 45000
+        }
+      ],
+      "expect": {
+        "finalState": "ready",
+        "isReady": true,
+        "notices": []
+      }
+    },
+    {
+      "name": "a_republished_renderer_track_cannot_emit_a_second_ready",
+      "comment": "Two video subscriptions schedule two settle timers; only the first may announce readiness, or a host re-runs whatever it does on ready.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "fire": 1200
+        }
+      ],
+      "expect": {
+        "finalState": "ready",
+        "readyRooms": [
+          "conf-livekit-room"
+        ]
+      }
+    },
+    {
+      "name": "an_agent_leaving_a_ready_session_ends_it_as_agent_ended",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "fire": 1200
+        },
+        {
+          "emit": "participant-disconnected",
+          "identity": "livealman-agent-1"
+        }
+      ],
+      "expect": {
+        "finalState": "ended",
+        "endedCause": "agent-ended",
+        "endedCount": 1,
+        "isReady": false,
+        "roomName": null,
+        "speaking": [
+          false
+        ],
+        "roomDisconnects": 1,
+        "roomsBuilt": 1
+      }
+    },
+    {
+      "name": "a_room_that_drops_under_a_live_session_reports_transport_ended",
+      "comment": "The other half of the classification, and the engine did NOT build a replacement room: roomsBuilt stays 1.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "disconnected"
+        }
+      ],
+      "expect": {
+        "finalState": "ended",
+        "endedCause": "transport-ended",
+        "endedCount": 1,
+        "isReady": false,
+        "speaking": [
+          false
+        ],
+        "roomDisconnects": 1,
+        "roomsBuilt": 1
+      }
+    },
+    {
+      "name": "a_host_teardown_ends_the_session_without_an_ended_event",
+      "comment": "The host asked for this, so telling it the session ended would be noise — and a host that treats `ended` as \"something went wrong\" would retry its own teardown.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "do": "disconnect"
+        }
+      ],
+      "expect": {
+        "finalState": "ended",
+        "endedCause": null,
+        "endedCount": 0,
+        "roomName": null,
+        "speaking": [
+          false
+        ],
+        "roomDisconnects": 1
+      }
+    },
+    {
+      "name": "a_duplicate_teardown_closes_the_room_exactly_once",
+      "timeline": [
+        {
+          "emit": "participant-disconnected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "do": "disconnect"
+        },
+        {
+          "do": "disconnect"
+        }
+      ],
+      "expect": {
+        "finalState": "ended",
+        "endedCause": "agent-ended",
+        "endedCount": 1,
+        "roomDisconnects": 1
+      }
+    },
+    {
+      "name": "reconnecting_drops_readiness_and_reconnected_restores_it",
+      "comment": "LiveKit is re-running its own join. Readiness is gone for the duration, the indicator is forced off (nothing is being heard), and the surviving video track means the renderer only has to settle again rather than be re-established.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "track-subscribed",
+          "kind": "video"
+        },
+        {
+          "fire": 1200
+        },
+        {
+          "emit": "reconnecting"
+        },
+        {
+          "emit": "reconnected"
+        },
+        {
+          "fire": 1200
+        }
+      ],
+      "expect": {
+        "finalState": "ready",
+        "isReady": true,
+        "notices": [],
+        "endedCause": null,
+        "speaking": [
+          false
+        ],
+        "warmingRooms": [
+          "conf-minted-room",
+          "conf-livekit-room"
+        ],
+        "readyRooms": [
+          "conf-livekit-room",
+          "conf-livekit-room"
+        ],
+        "roomsBuilt": 1
+      }
+    },
+    {
+      "name": "reconnected_without_a_renderer_track_re_arms_the_renderer_wait",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "reconnecting"
+        },
+        {
+          "emit": "reconnected"
+        },
+        {
+          "fire": 45000
+        }
+      ],
+      "expect": {
+        "finalState": "warming",
+        "notices": [
+          "renderer-timeout"
+        ],
+        "endedCause": null,
+        "speaking": [
+          false
+        ]
+      }
+    },
+    {
+      "name": "a_participant_who_is_not_the_renderer_agent_does_not_satisfy_the_join",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "viewer-2"
+        },
+        {
+          "fire": 10000
+        }
+      ],
+      "expect": {
+        "finalState": "joining",
+        "notices": [
+          "sessions-busy"
+        ]
+      }
+    },
+    {
+      "name": "a_non_agent_participant_leaving_does_not_end_the_session",
+      "comment": "Only the renderer leaving is terminal. Another viewer coming and going is ordinary room traffic.",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "emit": "participant-disconnected",
+          "identity": "viewer-2"
+        }
+      ],
+      "expect": {
+        "finalState": "warming",
+        "endedCause": null,
+        "endedCount": 0,
+        "roomDisconnects": 0
+      }
+    },
+    {
+      "name": "a_custom_agent_prefix_redefines_which_participant_is_the_renderer",
+      "agentIdentityPrefix": "custom-agent-",
+      "timeline": [
+        {
+          "emit": "participant-connected",
+          "identity": "livealman-agent-1"
+        },
+        {
+          "fire": 10000
+        },
+        {
+          "emit": "participant-connected",
+          "identity": "custom-agent-1"
+        },
+        {
+          "fire": 45000
+        }
+      ],
+      "expect": {
+        "finalState": "warming",
+        "notices": [
+          "sessions-busy",
+          "renderer-timeout"
+        ],
+        "endedCause": null
+      }
+    },
+    {
+      "name": "a_disabled_mint_never_loads_livekit_and_leaves_the_session_idle",
+      "comment": "Chat is off for this avatar. Nothing is announced, no room is built, and the transport import — the expensive part — is never paid for. `idle` and not `ended`, because a retry from here is legal.",
+      "mint": {
+        "kind": "disabled"
+      },
+      "timeline": [],
+      "expect": {
+        "connectResult": "disabled",
+        "finalState": "idle",
+        "roomsBuilt": 0,
+        "liveKitLoaded": false,
+        "warmingRooms": [],
+        "roomName": null
+      }
+    },
+    {
+      "name": "a_rate_limited_mint_propagates_untouched_and_leaves_the_session_idle",
+      "comment": "The engine does not classify, wrap, or retry what the host threw. 429 is terminal for the host to render, and the session is reusable.",
+      "mint": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 45
+      },
+      "timeline": [],
+      "expect": {
+        "throws": "mint-rate-limited",
+        "retryAfterSeconds": 45,
+        "finalState": "idle",
+        "roomsBuilt": 0,
+        "liveKitLoaded": false
+      }
+    },
+    {
+      "name": "an_arbitrary_host_mint_failure_propagates_and_leaves_the_session_idle",
+      "comment": "Not just the typed errors: whatever the host throws arrives by identity.",
+      "mint": {
+        "throws": "host-error"
+      },
+      "timeline": [],
+      "expect": {
+        "throws": "host-error",
+        "finalState": "idle",
+        "roomsBuilt": 0,
+        "liveKitLoaded": false
+      }
+    }
+  ]
+}

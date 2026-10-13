@@ -1,0 +1,10 @@
+{
+  "name": "twai-vanilla-js-sample",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "build:player": "npx --yes esbuild --bundle --format=esm --platform=browser --outfile=public/twai-player.js --alias:@twai/core=c:/Dev/twai-web-sdk/packages/core/dist/index.js --alias:@twai/player=c:/Dev/twai-web-sdk/packages/player/dist/index.js bundle-entry.js"
+  }
+}

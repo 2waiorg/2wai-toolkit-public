@@ -1,0 +1,46 @@
+name: twai_avatar_sdk_web_mse
+description: >-
+  HISTORICAL (2026-08-22). The MSE-over-WebSocket live-chat wire
+  this sink drives was retired on every 2wai avatar surface per
+  ADR-045 + ADR-049; LiveKit is now the only live-chat transport
+  (see twai_avatar_sdk_livekit). Package still ships and is not
+  scheduled for deletion — main_service continues to speak this
+  wire for non-chat surfaces — but new integrations should use the
+  LiveKit adapter.
+
+  Real MSE (Media Source Extensions) tail-following VideoSink for
+  Flutter web. Bit-for-bit sink counterpart to the reference Penthouse
+  player — appends fMP4 chunks to a growing SourceBuffer as they arrive
+  from the WS, drives HTMLVideoElement playback against a continuous
+  timeline, and honors the TwaiAvatarPlayerController's live-edge
+  clamp + jitter margin + PTS-gated speaking discipline. See
+  docs/sink_streaming_scoping.md §4 Phase 1 and the sink API contract
+  in §5.
+
+  This package is Flutter-web-only. On non-web platforms the sink
+  class throws on construction. Apps targeting multiple platforms
+  should conditional-import this alongside a fallback (e.g. the
+  accumulate-then-play VideoPlayerMseStreamSink).
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.24.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_core:
+  twai_avatar_sdk_player:
+  # Modern Dart web bindings — MediaSource, SourceBuffer,
+  # HTMLVideoElement, TimeRanges, all the browser video primitives.
+  web: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0

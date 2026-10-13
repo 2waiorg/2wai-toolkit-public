@@ -1,0 +1,16 @@
+{
+  "name": "twai-mint-proxy-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference mint proxy for the twai-api /v1/* wire (Node + Express).",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.22.2"
+  }
+}

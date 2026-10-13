@@ -1,0 +1,42 @@
+name: twai_avatar_sdk_video_player
+description: >-
+  HISTORICAL (2026-08-22). MSE-era VideoSink backend. The
+  MSE-over-WebSocket live-chat wire this sink was built for was
+  retired per ADR-045 + ADR-049; LiveKit is now the only live-chat
+  transport (see twai_avatar_sdk_livekit). Package still ships and
+  is not scheduled for deletion, but new integrations should use
+  the LiveKit adapter.
+
+  video_player + path_provider backed VideoSink implementations
+  for the 2wai Avatar SDK. One of two interchangeable video
+  backends; the other is twai_avatar_sdk_media_kit.
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.24.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.0
+  video_player: ^2.9.0
+  # Federated Windows desktop backend — the official video_player has no
+  # Windows implementation. Auto-registers on Windows; harmless elsewhere.
+  video_player_win: ^3.0.0
+  # Modern Dart web bindings (Blob, URL.createObjectURL, etc) — replaces
+  # the deprecated dart:html. Used only by lib/src/platform/blob_url_web.dart
+  # via conditional import; non-web targets get the stub.
+  web: ^1.1.0
+  twai_avatar_sdk:
+  twai_avatar_sdk_core:
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:

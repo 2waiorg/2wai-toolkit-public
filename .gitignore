@@ -1,0 +1,33 @@
+# Dart / Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+.claude/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local secrets — read via --dart-define-from-file=.env
+.env
+!.env.example
+
+# Generated platform folders inside apps (re-creatable via flutter create)
+# Keep android/, ios/, web/ committed — they include manifest/icon/HTML edits we own.
+
+# Node — apps/mint_proxy_examples/node ships as source; deps are installed
+# per-run via `npm install`. Keep package-lock.json for reproducibility.
+node_modules/
+*.bak

@@ -1,0 +1,29 @@
+name: twai_embed
+description: "2wai Avatar Web Component on Transport 0 (LiveKit) — registers <twai-avatar> and <twai-chat> custom elements that host a Flutter-based avatar inside any web page. Companion to the JS/TS Web Component in 2waiorg/twai-web-sdk (@twai/web-component); pick whichever runtime you prefer."
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_livekit:
+  # NetworkVideoIdle on native falls back to video_player; on web it uses
+  # the browser's <video> element. Web-only target here in practice.
+  twai_avatar_sdk_video_player:
+  # dart:js_interop bindings to the browser. Used for HTMLElement,
+  # customElements.define, attribute reads, CustomEvent dispatch.
+  web: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

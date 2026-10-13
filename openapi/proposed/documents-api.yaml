@@ -1,0 +1,402 @@
+openapi: 3.1.0
+info:
+  title: 2wai API — Documents (proposed)
+  version: 0.1.0-draft
+  description: |
+    **Status: PROPOSED — not yet on Mason's gateway.**
+
+    Public surface for the brain's document ingestion pipeline. Wraps the
+    internal `POST /document/upsert` in `avatar-brain/src/api/endpoints/document.py`
+    and exposes it as a workspace-scoped, tagged, async job model.
+
+    Roadmap items 3.10 (ingestion API) + 3.11 (tagging + categorization).
+
+    **Parameterized source model:** the ingestion request accepts a discriminated
+    union on `source.type` — `file`, `url`, `rss`, `notion`, ... — so new
+    connectors land as new source types without breaking the wire. File uploads
+    use `multipart/form-data`; every other source type uses JSON.
+
+servers:
+  - url: https://api.2wai.ai
+    description: Production (once landed — placeholder)
+
+security:
+  - BearerAuth: []
+
+paths:
+  /v1/avatars/{avatar_id}/documents:
+    post:
+      summary: Ingest a document into the avatar's knowledge base
+      description: |
+        Starts an ingestion job. Returns 202 with a `document_id` immediately;
+        the actual chunking + embedding + storage happens async. Poll
+        `GET /v1/documents/{document_id}` for status.
+
+        Two content types depending on `source.type`:
+
+        - `multipart/form-data` for file uploads (`source.type` = `"file"`).
+          File goes in the `file` part; the rest of the source object goes in
+          a `source` part as JSON.
+        - `application/json` for every other source type (URL, RSS, Notion, ...).
+
+        **Dedup:** if a document with the same `(source.type, identity)`
+        already exists for this avatar, returns 409 with the existing
+        `document_id` — no double-ingest, no double-billing.
+      operationId: ingest_document
+      parameters:
+        - $ref: '#/components/parameters/AvatarId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [source, file]
+              properties:
+                source:
+                  $ref: '#/components/schemas/FileSource'
+                file:
+                  type: string
+                  format: binary
+                  description: 'The file bytes. Allowed: PDF, MD, MP3, MP4.'
+                tags:
+                  type: string
+                  description: 'JSON-encoded string[]. Reason: multipart cannot represent nested types.'
+                  example: '["biography","early-life"]'
+                category:
+                  type: string
+                  description: 'Optional workspace-taxonomy category. If omitted, the brain infers via LLM.'
+                metadata:
+                  type: string
+                  description: 'JSON-encoded object for freeform provenance (author, date, source URL, etc.).'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '202':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Document already ingested for this avatar (dedup)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      existing_document_id:
+                        type: string
+
+    get:
+      summary: List documents ingested for this avatar
+      operationId: list_avatar_documents
+      parameters:
+        - $ref: '#/components/parameters/AvatarId'
+        - name: tags
+          in: query
+          description: Comma-separated tag filter (any-match). E.g. `tags=biography,quotes`.
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed]
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous response's `next_cursor`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Document roster
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Document' }
+                  next_cursor:
+                    type: string
+                    nullable: true
+
+  /v1/documents/{document_id}:
+    get:
+      summary: Get one document (poll job status or read metadata)
+      operationId: get_document
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update tags, category, or metadata without re-ingesting
+      description: |
+        Re-tagging is cheap — it only rewrites metadata on the existing Qdrant
+        chunks. Does not re-run chunking or embedding.
+      operationId: update_document
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tags:
+                  type: array
+                  items: { type: string }
+                category:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete a document and its chunks
+      description: |
+        Removes the doc's chunks from Qdrant and the Postgres record. Cascades
+        into RAG results on the next query — no cache warmup needed.
+      operationId: delete_document
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: sk_xxx
+
+  parameters:
+    AvatarId:
+      name: avatar_id
+      in: path
+      required: true
+      schema: { type: string }
+      example: avt_7472afe5c06e41c2f5d5401a
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema: { type: string }
+      example: doc_9b3c1e2a...
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing / invalid / out-of-scope key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource does not exist or is not visible to this key
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+
+    IngestRequest:
+      type: object
+      required: [source]
+      properties:
+        source:
+          $ref: '#/components/schemas/Source'
+        tags:
+          type: array
+          items: { type: string }
+          example: ["biography", "early-life"]
+        category:
+          type: string
+          description: |
+            Workspace-taxonomy category. If omitted, the brain infers a category
+            via LLM (current behavior in `classify_and_summarize`).
+        metadata:
+          type: object
+          additionalProperties: true
+          description: 'Freeform provenance — author, date, source URL, whatever the workspace wants surfaced back on retrieval.'
+
+    # -----------------------------------------------------------------------
+    # SOURCE — the parameterized bit. Discriminated union on `type`.
+    # New source connectors (Slack, Confluence, Google Drive, ...) land as new
+    # entries in this oneOf without breaking the surface for existing clients.
+    # -----------------------------------------------------------------------
+    Source:
+      oneOf:
+        - $ref: '#/components/schemas/FileSource'
+        - $ref: '#/components/schemas/UrlSource'
+        - $ref: '#/components/schemas/RssSource'
+        - $ref: '#/components/schemas/NotionSource'
+      discriminator:
+        propertyName: type
+        mapping:
+          file: '#/components/schemas/FileSource'
+          url: '#/components/schemas/UrlSource'
+          rss: '#/components/schemas/RssSource'
+          notion: '#/components/schemas/NotionSource'
+
+    FileSource:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [file] }
+        filename:
+          type: string
+          description: 'Overrides the multipart filename. Optional.'
+
+    UrlSource:
+      type: object
+      required: [type, url]
+      properties:
+        type: { type: string, enum: [url] }
+        url:
+          type: string
+          format: uri
+          description: |
+            HTTP(S) URL. Server fetches, sniffs content-type, then routes
+            through the same extension pipeline as file uploads (HTML → text,
+            PDF → text, MP3/MP4 → transcribe).
+          example: https://example.com/interview-2026-01.pdf
+        follow_redirects:
+          type: boolean
+          default: true
+        auth:
+          type: object
+          description: 'Optional bearer/basic for private URLs.'
+          properties:
+            scheme: { type: string, enum: [bearer, basic] }
+            token: { type: string }
+            username: { type: string }
+            password: { type: string }
+
+    RssSource:
+      type: object
+      required: [type, url]
+      properties:
+        type: { type: string, enum: [rss] }
+        url:
+          type: string
+          format: uri
+          description: 'Feed URL. Server enumerates entries and ingests each as its own document (one job spawns N children).'
+        max_items:
+          type: integer
+          default: 50
+        since:
+          type: string
+          format: date-time
+          description: 'Only ingest entries newer than this. Enables incremental refreshes.'
+        subscribe:
+          type: boolean
+          default: false
+          description: |
+            If true, server subscribes and auto-ingests new items as they
+            appear. Refresh cadence is server-controlled (~hourly). This is
+            the "keep the avatar's knowledge fresh from this feed" mode.
+
+    NotionSource:
+      type: object
+      required: [type, notion_page_id, notion_token]
+      properties:
+        type: { type: string, enum: [notion] }
+        notion_page_id: { type: string }
+        notion_token: { type: string, description: 'Integration secret.' }
+        include_children:
+          type: boolean
+          default: true
+          description: 'Ingest linked sub-pages recursively.'
+
+    # -----------------------------------------------------------------------
+    # DOCUMENT — what we return
+    # -----------------------------------------------------------------------
+    Document:
+      type: object
+      required: [document_id, avatar_id, status, source]
+      properties:
+        document_id: { type: string, example: doc_9b3c1e2a... }
+        avatar_id: { type: string }
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        source:
+          $ref: '#/components/schemas/Source'
+        filename:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+          description: 'Effective category — customer-supplied OR LLM-inferred.'
+        category_source:
+          type: string
+          enum: [user, inferred]
+          description: 'How the category was set.'
+        tags:
+          type: array
+          items: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        chunk_count:
+          type: integer
+          nullable: true
+          description: 'Number of chunks after processing. Null while pending/processing.'
+        summary:
+          type: string
+          nullable: true
+          description: 'LLM-generated summary from `classify_and_summarize` — present once processed.'
+        error:
+          type: string
+          nullable: true
+          description: 'Populated when `status = failed`.'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

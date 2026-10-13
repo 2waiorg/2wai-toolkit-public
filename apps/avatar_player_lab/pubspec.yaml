@@ -1,0 +1,30 @@
+name: avatar_player_lab
+description: "TwaiPlayer capability exerciser — every SDK knob as a live control. Boot maxed-out; dial back to bisect. See docs/twai_player_capability_exerciser_plan.md."
+publish_to: 'none'
+version: 0.1.4+5
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_video_player:
+  twai_avatar_sdk_web_mse:
+  twai_avatar_sdk_livekit:
+  twai_avatar_sdk_player:
+  http: ^1.2.0
+  path_provider: ^2.1.0
+  video_player: ^2.9.0
+  web: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

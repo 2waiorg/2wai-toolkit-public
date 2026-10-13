@@ -1,0 +1,25 @@
+name: twai_api_starter
+description: "Reference SDK app for the twai-api /v1/* wire on Transport 0 (LiveKit) with **BYO brain** (Option β). Split-plane mint-proxy pattern: zero sk_ in the browser; customer's brain calls /v1/sessions/:sid/speak directly with generated reply text."
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk:
+  twai_avatar_sdk_livekit:
+  twai_avatar_sdk_video_player:
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

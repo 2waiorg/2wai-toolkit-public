@@ -1,0 +1,315 @@
+{
+  "description": "The speaking indicator over LiveKit: `livealman`-topic data messages in, `speaking {active}` transitions out. Derived from the engine's DataReceived handler in packages/core/src/engine.ts. The producer is clg_pp_payment `vm-mirror/wav2lip-training/home/azureuser/livealman-host/host.py` (origin/staging): `SPEAKING_TOPIC = \"livealman\"`, and `SpeakingPublisher.enqueue` publishes exactly {\"type\": \"speaking\", \"value\": \"start\"|\"stop\"} through one FIFO so the transitions arrive IN ORDER. The renderer agent joins as `livealman-agent-<job id>` (host.py `req.accept(identity=...)`), which is where the default agent-identity prefix comes from. This is NOT the MSE pts gate (archived under vectors/mse-archive/). LiveKit delivers the indicator on the same connection as the media, so there is no playhead to gate against and a conforming client fires on receipt, in order. Four rules are decisions: (1) the transitions are NOT deduplicated client-side — the producer already owns that state (its SpeakingTracker), and a client that swallowed a repeat would hide a producer bug; (2) an unknown `value`, a non-`speaking` `type`, a payload that is not JSON, and a payload that is JSON but not an object all pass silently, because a data channel a client can crash on is a data channel an unrelated future message can take the session down with; (3) only the RENDERER AGENT is believed — a message from any other participant is ignored, so a third participant in the room cannot drive the avatar's mouth; (4) a message with NO participant is server-originated and IS believed, because the filter is on strangers, not on the absence of a sender. Scenario shape: `messages` is replayed in order, each with the LiveKit `topic` it arrived on, the `from` identity (null = server-originated, no participant), and the raw UTF-8 `payload` text that was on the wire. `expectActive` is the exact ordered list of `active` values emitted. OBSERVED, not contract (see CAPTURE.md): the indicator tracks AUDIO, which lags text. In the 2026-08-24 capture `speaking: start` arrived after reply frames seq 0 through 8, so a client gating its text render on this indicator would have added about 3.7 s of dead air with the reply already in hand.",
+  "scenarios": [
+    {
+      "name": "one_reply_starts_and_stops",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        }
+      ],
+      "expectActive": [
+        true,
+        false
+      ]
+    },
+    {
+      "name": "a_full_two_turn_exchange",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        }
+      ],
+      "expectActive": [
+        true,
+        false,
+        true,
+        false
+      ]
+    },
+    {
+      "name": "repeated_transitions_are_not_deduplicated",
+      "comment": "The producer owns the speaking state; a client that collapsed these would hide a producer bug rather than fix one.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        }
+      ],
+      "expectActive": [
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "a_stop_with_no_preceding_start_still_reports_stop",
+      "comment": "Joining mid-reply is normal. The indicator is a report of what the producer said, not a state machine the client second-guesses.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        }
+      ],
+      "expectActive": [
+        false
+      ]
+    },
+    {
+      "name": "an_unknown_value_is_ignored",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"pause\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"\"}"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_non_speaking_type_is_ignored",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"listening\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_payload_that_is_not_json_is_ignored_rather_than_thrown",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "not json at all"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_json_payload_that_is_not_an_object_is_ignored",
+      "comment": "Note `null` in the list. It is the one that actually bites: parsing it SUCCEEDS, so a client that only guards the parse still reaches it and then reads a field off nothing.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "null"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "42"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "\"speaking\""
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "[1,2]"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_malformed_payload_cannot_stall_the_indicator_for_the_rest_of_the_session",
+      "comment": "The interleaved form, and the one worth having: a client that CRASHES on the malformed message rather than skipping it fails here and passes the ignore-only rows above, because \"emitted nothing\" and \"died\" look identical until something valid has to follow. Reading a field off a null throws out of the data handler and into the transport's own dispatch loop, so what is really being pinned is that the handler is still installed afterwards.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "null"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "\"hi\""
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "null"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"stop\"}"
+        }
+      ],
+      "expectActive": [
+        true,
+        false
+      ]
+    },
+    {
+      "name": "the_reply_and_control_topics_never_move_the_indicator",
+      "comment": "The three data topics are disjoint by design. A speaking-shaped payload on the wrong topic is not a speaking event.",
+      "messages": [
+        {
+          "topic": "2wai.reply",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "2wai.control",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "lk.chat",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_message_with_no_topic_is_ignored",
+      "messages": [
+        {
+          "topic": null,
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": []
+    },
+    {
+      "name": "a_participant_who_is_not_the_renderer_agent_is_ignored",
+      "comment": "A third participant in the room must not be able to drive the avatar indicator. Only identities under the agent prefix are believed.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "viewer-2",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": [
+        true
+      ]
+    },
+    {
+      "name": "a_server_originated_message_with_no_participant_is_believed",
+      "comment": "The filter turns away strangers, not the absence of a sender. Data published by the server itself carries no participant.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": null,
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": [
+        true
+      ]
+    },
+    {
+      "name": "a_custom_agent_prefix_redefines_which_participant_is_believed",
+      "agentIdentityPrefix": "custom-agent-",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        },
+        {
+          "topic": "livealman",
+          "from": "custom-agent-9",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\"}"
+        }
+      ],
+      "expectActive": [
+        true
+      ]
+    },
+    {
+      "name": "unknown_extra_fields_on_a_speaking_message_are_tolerated",
+      "comment": "Forward compatibility: a producer that adds a field must not silence the indicator on older clients.",
+      "messages": [
+        {
+          "topic": "livealman",
+          "from": "livealman-agent-1",
+          "payload": "{\"type\":\"speaking\",\"value\":\"start\",\"pts\":2.34,\"seq\":7}"
+        }
+      ],
+      "expectActive": [
+        true
+      ]
+    }
+  ]
+}

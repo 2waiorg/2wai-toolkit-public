@@ -1,0 +1,26 @@
+name: twai_api_demo
+description: "Direct exercise of the twai-api gateway on Transport 0 (LiveKit) — a raw-wire teaching artifact with ZERO twai_avatar_sdk_* deps. Uses `livekit_client` directly. Migrated from the pre-2026-08-22 MSE-wire client after ADR-049. Use to prove the gateway + T0 wire before adopting the higher-level SDK."
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: ^3.6.0
+
+resolution: workspace
+
+# Deliberately minimal — no twai_avatar_sdk_* deps. The point of this
+# app is to prove the twai-api + LiveKit wire works standalone; if it
+# ever depends on our SDK it stops being a fair test of the API.
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  livekit_client: 2.8.1
+  uuid: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

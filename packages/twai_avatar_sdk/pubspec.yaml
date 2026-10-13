@@ -1,0 +1,67 @@
+name: twai_avatar_sdk
+description: "Flutter UI surface for the 2wai Avatar SDK — VideoSink interface only. Pick a backend implementation by also depending on twai_avatar_sdk_video_player or twai_avatar_sdk_media_kit."
+version: 0.0.3
+publish_to: 'none'
+
+environment:
+  sdk: ^3.6.0
+  flutter: ">=3.24.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  twai_avatar_sdk_core:
+  # Reference-parity player controller. TwaiAvatarPlayerStage widget
+  # composes it with an idle source + sink for the new-player path.
+  # Pure-Dart; adds no native deps.
+  twai_avatar_sdk_player:
+  # Default sink packages the TwaiPlayer widget picks between at
+  # runtime via kIsWeb. Apps that want to override (e.g. use
+  # MediaKitMseStreamSink on Windows) pass their own sinkFactory:
+  # to TwaiPlayer instead — but the out-of-the-box path picks the
+  # right sink for every platform without app-side wiring.
+  twai_avatar_sdk_video_player:
+  twai_avatar_sdk_web_mse:
+  # dart:js_interop bindings for browser SpeechRecognition (used by
+  # BrowserSpeechTranscriber on web). Tree-shaken out of native builds.
+  web: ^1.1.0
+  # Native STT plugin used by SpeechToTextTranscriber on Android / iOS /
+  # macOS / Windows. Web target uses BrowserSpeechTranscriber instead
+  # (direct dart:js_interop wrap of SpeechRecognition); speech_to_text's
+  # own web plugin is bypassed because its initialize() failed silently
+  # in the embedded-Flutter-in-custom-element host. Conditional barrel
+  # picks the right impl per platform; customers see one DefaultTranscriber.
+  speech_to_text: ^7.0.0
+  # Used by the AvatarIdleSource types (AssetVideoIdle, NetworkVideoIdle)
+  # so customers get looping idle-video widgets out of the box — no need
+  # to instantiate their own controllers. Kept identical to the version
+  # in twai_avatar_sdk_video_player so both packages resolve one copy.
+  video_player: ^2.9.0
+  # HTTP client + MediaType — used by HttpSttTranscriber on web to POST
+  # recorded audio blobs to a server-side STT endpoint (Whisper-shaped).
+  # http_parser is already transitive of http; naming it explicitly so
+  # the MediaType import in http_stt_transcriber_web.dart is legal.
+  http: ^1.2.0
+  http_parser: ^4.0.0
+  # Cross-platform audio capture + session management for
+  # RecordSttTranscriber (Android + iOS + web + desktop). Sidesteps the
+  # SpeechRecognizer path that the current `speech_to_text` chain has an
+  # Android + LiveKit coexistence gap on.
+  # See docs/audio_stream_transcriber_design.md.
+  record: ^6.1.1
+  audio_session: ^0.2.2
+  # Persistence backend for TwaiGreeting.text's "has this opener been
+  # sent?" flag — SharedPreferencesGreetingStore uses it. Consumers can
+  # swap in their own `GreetingStore` to avoid the dep in principle,
+  # but shared_preferences is nearly universal in Flutter apps so the
+  # SDK carries it. Pinned to match apps/admin.
+  shared_preferences: ^2.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:

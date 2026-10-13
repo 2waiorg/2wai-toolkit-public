@@ -1,0 +1,161 @@
+{
+  "description": "The outbound chat envelope. Derived from packages/core/src/engine.ts `send(text, extra?)` and the send/extras tests in packages/core/tests/engine.test.ts. The producer side of this wire is clg_pp_payment `vm-mirror/wav2lip-training/home/azureuser/livealman-host/host.py` (origin/staging) — `parse_pp_chat` validates exactly this shape off LiveKit's `lk.chat` text stream. The rule the vectors exist to hold: the envelope is built ENGINE-SIDE, and `extra` is merged FIRST so the engine's own fields always win. A host cannot forge `request_id`, downgrade `v`, or substitute the text the user actually typed — flip the merge order and every no-clobber row below fails. `request_id` is minted fresh per turn and therefore cannot be pinned to a literal: rows assert it against `expect.requestId` instead (`pattern` names the format, `notEqualTo` lists values an extra tried to inject, and `uniqueAcrossBuilds` means a runner builds the row TWICE and the two ids must differ). `expect.envelope` is compared against the built envelope with `request_id` removed. `uuid-v4` is what the shipped engine mints; the RECEIVER's constraint is looser (host.py `_REQUEST_ID_RE` is `^[A-Za-z0-9_-]{1,96}$`), so an implementation that wants a different id scheme is changing this contract deliberately rather than working around it. `ready` DEFAULTS TO true: a row omitting it is built on a session whose renderer has settled. Set it to false to exercise the send guard, which throws the typed `not-ready` error rather than publishing. NOTE on extras and the receiver: the engine passes any extra through, but PP's host allowlists {v, request_id, text, gamification_level, avatar_state_block} and rejects an envelope carrying anything else. That is a receiver policy, not an engine one — the engine is the wrong place to hardcode one deployment's allowlist — so the rows below pin construction, and the two PP-real extras appear as the worked example.",
+  "cases": [
+    {
+      "name": "text_only_builds_the_minimal_envelope",
+      "text": "hello",
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "hello"
+        },
+        "requestId": {
+          "pattern": "uuid-v4",
+          "uniqueAcrossBuilds": true
+        }
+      }
+    },
+    {
+      "name": "an_empty_extra_object_changes_nothing",
+      "text": "hello",
+      "extra": {},
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "hello"
+        },
+        "requestId": {
+          "pattern": "uuid-v4"
+        }
+      }
+    },
+    {
+      "name": "extras_merge_alongside_the_engine_fields",
+      "text": "hi",
+      "extra": {
+        "mood": "x"
+      },
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "hi",
+          "mood": "x"
+        },
+        "requestId": {
+          "pattern": "uuid-v4"
+        }
+      }
+    },
+    {
+      "name": "extras_cannot_clobber_v_request_id_or_text",
+      "comment": "The whole reason the merge order is what it is. A host that sets these keys gets its OWN values discarded, not the engine's.",
+      "text": "hi",
+      "extra": {
+        "v": 99,
+        "request_id": "forged",
+        "text": "not what the user typed",
+        "mood": "x"
+      },
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "hi",
+          "mood": "x"
+        },
+        "requestId": {
+          "pattern": "uuid-v4",
+          "notEqualTo": [
+            "forged"
+          ],
+          "uniqueAcrossBuilds": true
+        }
+      }
+    },
+    {
+      "name": "the_two_penthouse_extras_ride_along_unchanged",
+      "comment": "host.py `parse_pp_chat` accepts exactly these two beyond the engine's own three. gamification_level is a non-negative integer; avatar_state_block is a string.",
+      "text": "what are you wearing?",
+      "extra": {
+        "gamification_level": 3,
+        "avatar_state_block": "outfit=lingerie; mood=playful"
+      },
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "what are you wearing?",
+          "gamification_level": 3,
+          "avatar_state_block": "outfit=lingerie; mood=playful"
+        },
+        "requestId": {
+          "pattern": "uuid-v4"
+        }
+      }
+    },
+    {
+      "name": "nested_extras_are_carried_through_structurally",
+      "comment": "The merge is one level deep; values are passed by reference, not rebuilt.",
+      "text": "hi",
+      "extra": {
+        "ctx": {
+          "a": [
+            1,
+            2,
+            {
+              "b": null
+            }
+          ]
+        },
+        "flag": false
+      },
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "hi",
+          "ctx": {
+            "a": [
+              1,
+              2,
+              {
+                "b": null
+              }
+            ]
+          },
+          "flag": false
+        },
+        "requestId": {
+          "pattern": "uuid-v4"
+        }
+      }
+    },
+    {
+      "name": "text_is_passed_through_verbatim",
+      "comment": "No trimming, no normalization, no escaping beyond JSON. Whitespace and non-BMP characters are the user's, and the receiver is what decides whether an all-whitespace turn is legal.",
+      "text": "  héllo 😀  ",
+      "expect": {
+        "topic": "lk.chat",
+        "envelope": {
+          "v": 1,
+          "text": "  héllo 😀  "
+        },
+        "requestId": {
+          "pattern": "uuid-v4"
+        }
+      }
+    },
+    {
+      "name": "send_before_the_renderer_is_ready_is_refused",
+      "comment": "A turn published into a room whose renderer has not painted is a reply nobody sees. The guard is on the session, not on the envelope, so it is pinned here rather than left to the host.",
+      "ready": false,
+      "text": "hi",
+      "expect": {
+        "throws": "not-ready"
+      }
+    }
+  ]
+}

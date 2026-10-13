@@ -1,0 +1,374 @@
+{
+  "description": "The session's inbound data and text-stream surface: what a live session does with agent traffic on the `2wai.reply` / `2wai.control` data topics and the `lk.transcription` text stream, and how an outbound turn interacts with both. Derived from packages/core/src/engine.ts — the DataReceived handler and `consumeFallbackTranscription` (engine.ts:543) — and the corresponding tests in packages/core/tests/engine.test.ts. THE FALLBACK PATH exists because a reply can arrive as a plain LiveKit transcription stream instead of the reply protocol. Three rules govern it: (1) it produces the SAME reply:* events, so a host renders one feed and does not care which arrived; (2) the protocol SUPERSEDES it — once any well-formed protocol frame has been seen, the fallback contributes nothing, because a reply delivered both ways would render twice; (3) expression tags are stripped here TOO. That third one is easy to lose: this path does not go through the reducer, so it cannot inherit the strip and repeats it. A regression there leaks direction tags to ordinary users on the fallback path only, which is the hardest kind of leak to notice. `transcript` is additive and narrower than reply:*: it is the agent's reply on the fallback path and nothing else. It is not the user's speech-to-text, and a reply delivered by protocol emits no transcript at all — a host wanting one feed listens to reply:* and treats transcript as diagnostics. An aborted stream still finalises (`final: true`), because a consumer that only ever saw `final: false` would wait forever for an end that never comes. DELIBERATELY UNSPECIFIED: what happens to a transcription from a THIRD participant. The handler filters only \"not the local participant\" while the data handler filters on the agent prefix; engine.ts:330 documents the asymmetry as harmless in a two-party room and unresolved for multi-party ones. Vectoring either answer now would freeze a decision nobody has made, so only the local-participant filter is pinned below. Scenario shape: `timeline` is replayed in order. `{\"data\": {...}}` publishes one raw data message (its `payload` is the exact UTF-8 text on the wire); `{\"transcription\": {...}}` opens one `lk.transcription` stream, yielding `chunks` as per-chunk DELTAS and, with `failsWith`, aborting after them; `{\"send\": {...}}` publishes an outbound turn. Every scenario runs on a session already driven to ready. `expectEvents` is the exact ordered log of reply:start / reply:text / reply:complete / transcript / control; the lifecycle events (warming, ready, speaking) belong to the other files and are not logged here. OBSERVED, not contract (see CAPTURE.md): the two text channels are not interchangeable and diverged by about 17 seconds in the 2026-08-24 capture, because 2wai.reply is LLM-paced while lk.transcription is speech-paced and keeps arriving long after the protocol reply has completed. Waiting for both stalls for the length of the spoken reply; rendering both double-renders it.",
+  "agentIdentity": "livealman-agent-1",
+  "scenarios": [
+    {
+      "name": "a_plain_transcription_stream_becomes_a_reply_with_tags_stripped",
+      "comment": "The per-chunk shape is the contract: each chunk emits reply:text then transcript, and completion emits reply:complete then a final transcript.",
+      "timeline": [
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "[flirty]Hey ",
+              "there"
+            ]
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "reply:start",
+          "replyId": "stream-1"
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-1",
+          "text": "Hey "
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey ",
+          "final": false
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-1",
+          "text": "Hey there"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey there",
+          "final": false
+        },
+        {
+          "event": "reply:complete",
+          "replyId": "stream-1",
+          "text": "Hey there",
+          "kind": "end"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey there",
+          "final": true
+        }
+      ]
+    },
+    {
+      "name": "a_fallback_stream_that_fails_mid_reply_completes_as_error_and_finalises",
+      "comment": "What arrived is kept and closed out, not silently dropped and not left open forever. `final: true` on the abort is what lets a consumer stop waiting.",
+      "timeline": [
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "[flirty]Hey ",
+              "there"
+            ],
+            "failsWith": "stream aborted"
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "reply:start",
+          "replyId": "stream-1"
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-1",
+          "text": "Hey "
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey ",
+          "final": false
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-1",
+          "text": "Hey there"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey there",
+          "final": false
+        },
+        {
+          "event": "reply:complete",
+          "replyId": "stream-1",
+          "text": "Hey there",
+          "kind": "error"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "Hey there",
+          "final": true
+        }
+      ]
+    },
+    {
+      "name": "the_reply_protocol_supersedes_fallback_transcription",
+      "comment": "One protocol frame is enough. The agent is speaking the protocol, so a transcription of the same reply is a duplicate, and rendering both would double every line.",
+      "timeline": [
+        {
+          "data": {
+            "topic": "2wai.reply",
+            "payload": "{\"v\":1,\"reply_id\":\"r-1\",\"seq\":0,\"kind\":\"start\"}"
+          }
+        },
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "ignored"
+            ]
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "reply:start",
+          "replyId": "r-1"
+        }
+      ]
+    },
+    {
+      "name": "keep_tags_on_keeps_direction_tags_on_the_fallback_path_too",
+      "comment": "The admin review path has to reach BOTH paths, or a reviewer judging tagging sees it on protocol replies and not on fallback ones.",
+      "keepTags": true,
+      "timeline": [
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "[flirty]Hey there"
+            ]
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "reply:start",
+          "replyId": "stream-1"
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-1",
+          "text": "[flirty]Hey there"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "[flirty]Hey there",
+          "final": false
+        },
+        {
+          "event": "reply:complete",
+          "replyId": "stream-1",
+          "text": "[flirty]Hey there",
+          "kind": "end"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "[flirty]Hey there",
+          "final": true
+        }
+      ]
+    },
+    {
+      "name": "the_local_participants_own_transcription_is_never_read_as_a_reply",
+      "comment": "Our own microphone transcription coming back to us is not the avatar talking. Without this filter the user would watch their own words appear as the reply.",
+      "timeline": [
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "my own voice"
+            ],
+            "fromLocal": true
+          }
+        }
+      ],
+      "expectEvents": []
+    },
+    {
+      "name": "a_new_outbound_turn_reopens_the_fallback_path",
+      "comment": "This is send() resetting the reducer, observed at SESSION level rather than on the reducer in isolation. Without the reset the protocol latch from turn 1 would suppress the fallback for the rest of the session — so a session whose first reply used the protocol and whose second did not would simply show nothing, silently, forever.",
+      "timeline": [
+        {
+          "data": {
+            "topic": "2wai.reply",
+            "payload": "{\"v\":1,\"reply_id\":\"r-1\",\"seq\":0,\"kind\":\"start\"}"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.reply",
+            "payload": "{\"v\":1,\"reply_id\":\"r-1\",\"seq\":1,\"kind\":\"delta\",\"text\":\"Hello\"}"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.reply",
+            "payload": "{\"v\":1,\"reply_id\":\"r-1\",\"seq\":2,\"kind\":\"end\",\"text\":\"Hello\"}"
+          }
+        },
+        {
+          "transcription": {
+            "id": "stream-1",
+            "chunks": [
+              "suppressed"
+            ]
+          }
+        },
+        {
+          "send": {
+            "text": "next question"
+          }
+        },
+        {
+          "transcription": {
+            "id": "stream-2",
+            "chunks": [
+              "now visible"
+            ]
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "reply:start",
+          "replyId": "r-1"
+        },
+        {
+          "event": "reply:text",
+          "replyId": "r-1",
+          "text": "Hello"
+        },
+        {
+          "event": "reply:complete",
+          "replyId": "r-1",
+          "text": "Hello",
+          "kind": "end"
+        },
+        {
+          "event": "reply:start",
+          "replyId": "stream-2"
+        },
+        {
+          "event": "reply:text",
+          "replyId": "stream-2",
+          "text": "now visible"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "now visible",
+          "final": false
+        },
+        {
+          "event": "reply:complete",
+          "replyId": "stream-2",
+          "text": "now visible",
+          "kind": "end"
+        },
+        {
+          "event": "transcript",
+          "participant": "livealman-agent-1",
+          "text": "now visible",
+          "final": true
+        }
+      ]
+    },
+    {
+      "name": "a_mood_control_event_reaches_the_host_and_only_on_its_own_topic",
+      "comment": "The producer is brain_llm.py `_emit_control`, which forwards the brain's `mood` and `scenario_state` SSE events as {v, kind, ...} minus `type`. The engine does not interpret them — it hands the object straight to the host — so the contract is delivery and filtering, not semantics.",
+      "timeline": [
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "{\"v\":1,\"kind\":\"mood\",\"mood\":\"playful\",\"intensity\":2}"
+          }
+        },
+        {
+          "data": {
+            "topic": "livealman",
+            "payload": "{\"v\":1,\"kind\":\"mood\",\"mood\":\"ignored\"}"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "null"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "42"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "not json"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "{\"v\":1,\"kind\":\"scenario_state\",\"state\":\"act2\"}"
+          }
+        }
+      ],
+      "expectEvents": [
+        {
+          "event": "control",
+          "payload": {
+            "v": 1,
+            "kind": "mood",
+            "mood": "playful",
+            "intensity": 2
+          }
+        },
+        {
+          "event": "control",
+          "payload": {
+            "v": 1,
+            "kind": "scenario_state",
+            "state": "act2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a_data_message_from_a_participant_who_is_not_the_agent_is_ignored",
+      "comment": "Same agent-prefix filter as the speaking indicator, on every topic.",
+      "timeline": [
+        {
+          "data": {
+            "topic": "2wai.control",
+            "payload": "{\"v\":1,\"kind\":\"mood\"}",
+            "from": "viewer-2"
+          }
+        },
+        {
+          "data": {
+            "topic": "2wai.reply",
+            "payload": "{\"v\":1,\"reply_id\":\"r-x\",\"seq\":0,\"kind\":\"start\"}",
+            "from": "viewer-2"
+          }
+        }
+      ],
+      "expectEvents": []
+    }
+  ]
+}
