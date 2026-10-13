@@ -2,9 +2,9 @@
 
 Native Swift SDK for the 2wai Avatar Toolkit. Transport 0 (LiveKit), mint-proxy pattern, SwiftUI-first. Ships as a Swift Package.
 
-**Status: v0.1 pre-release.** Code is complete-shape and sized to compile against LiveKit Swift SDK `2.3.x`. **Needs iPhone verification on a real device** before any public use — authored on Windows, no iOS build on this machine. Open in Xcode, build + run `Samples/HelloAvatar/` against a running mint proxy, iterate.
+**Status: v0.1 shipped and device-verified** on physical iPhone (greeting plays, audio plays, Q&A loop works, idle video works). Open in Xcode, build + run `Samples/HelloAvatar/` against a running mint proxy.
 
-Design doc + rationale: [`docs/internal/ios_native_sdk_plan.md`](../docs/internal/ios_native_sdk_plan.md) on toolkit main. The code shape here matches that plan's v0.1 scope exactly: `TwaiCore` + `TwaiLiveKit` + `TwaiPlayer` + one sample. Mic + full catalog hydrate wiring deferred to v0.2.
+v0.1 scope: `TwaiCore` + `TwaiLiveKit` + `TwaiPlayer` + one sample. Mic + full catalog hydrate wiring deferred to v0.2.
 
 ## Install
 
@@ -125,7 +125,6 @@ Deferred to v0.2:
 
 ## Related
 
-- [iOS SDK plan](../docs/internal/ios_native_sdk_plan.md) — design doc this v0.1 ships from.
-- [Flutter SDK](../packages/) — the sibling and reference implementation. Transport 0 engine source: [`packages/twai_avatar_sdk_livekit/lib/src/transport0/`](../packages/twai_avatar_sdk_livekit/lib/src/transport0/).
-- [TypeScript SDK](https://github.com/2waiorg/twai-web-sdk) — the web sibling (Mason-owned).
-- [`docs/internal/sample_directory_shape.md`](../docs/internal/sample_directory_shape.md) — the planned cookbook grid; this SDK's HelloAvatar becomes the `samples/ios-native/01_mint_and_play` cell.
+- [Flutter SDK](../packages/) — the sibling implementation. Transport 0 engine source: [`packages/twai_avatar_sdk_livekit/lib/src/transport0/`](../packages/twai_avatar_sdk_livekit/lib/src/transport0/).
+- [TypeScript SDK](https://github.com/2waiorg/twai-web-sdk) — the web sibling.
+- [Dev docs](https://developers.2wai.ai/sdks/ios-native/) — iOS native SDK page with the public quickstart.

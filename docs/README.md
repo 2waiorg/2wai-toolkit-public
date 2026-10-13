@@ -21,6 +21,6 @@ Internal planning docs, pitch material, session handoffs, and design iterations 
 ## Where to look for more
 
 - [wiki.2wai.ai/avatar-toolkit/](https://wiki.2wai.ai/avatar-toolkit/) — the canonical, searchable reference. The wiki is where cross-repo architecture decisions and the LiveKit transport story live.
-- [`internal/`](internal/) — planning docs, session handoffs, pitch material (not for external developers).
 - [`../README.md`](../README.md) — top-level toolkit README (install, quickstart, repo map).
-- [`../apps/`](../apps/) — public reference apps (and `apps/internal/` for the non-public ones).
+- [`../apps/`](../apps/) — public reference apps.
+- [https://developers.2wai.ai/](https://developers.2wai.ai/) — the dev docs site, with quickstarts + guides + API reference.
